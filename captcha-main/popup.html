@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CVTax – Tự động giải captcha</title>
+  <style>
+    :root {
+      --bg-canvas: #F8FAFC;
+      --bg-surface: #FFFFFF;
+      --bg-subtle: #F1F5F9;
+      --border: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --ink: #0F172A;
+      --ink-secondary: #475569;
+      --ink-muted: #64748B;
+      --accent: #0F4C3A;
+      --accent-hover: #0A382A;
+      --accent-tint: #ECFDF5;
+      --accent-ink: #065F46;
+      --success: #15803D;
+      --warn-bg: #FFFBEB;
+      --warn-border: #FDE68A;
+      --warn-ink: #92400E;
+      --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --radius-lg: 14px;
+      --radius-md: 10px;
+      --radius-sm: 7px;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      width: 344px;
+      min-height: 540px;
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--ink);
+      background-color: var(--bg-canvas);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .tabular {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+    }
+
+    .ext-shell {
+      width: 344px;
+      min-height: 540px;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--bg-canvas);
+      position: relative;
+    }
+
+    /* 1. Extension Header */
+    .ext-header {
+      padding: 14px 16px 12px;
+      background-color: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .brand img {
+      width: 26px;
+      height: 26px;
+      border-radius: 7px;
+      display: block;
+      flex-shrink: 0;
+    }
+
+    .brand-name {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .header-meta {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--success);
+      white-space: nowrap;
+    }
+
+    /* 2. Compact 3-tab Segmented Bar */
+    .ext-tabs {
+      padding: 10px 16px 0;
+      background-color: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+    }
+
+    .ext-tab {
+      padding: 7px 6px 9px;
+      border: none;
+      border-bottom: 2px solid transparent;
+      background: transparent;
+      color: var(--ink-muted);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .ext-tab:hover {
+      color: var(--ink);
+    }
+
+    .ext-tab[aria-selected="true"] {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .ext-tab:focus-visible,
+    .btn-primary:focus-visible,
+    .btn-secondary:focus-visible,
+    .filter-btn:focus-visible,
+    .portal-row:focus-visible,
+    select:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Toast */
+    .toast {
+      position: absolute;
+      top: 56px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 40;
+      max-width: 312px;
+      padding: 7px 14px;
+      border-radius: var(--radius-md);
+      background-color: var(--ink);
+      color: #FFFFFF;
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      box-shadow: 0 6px 18px rgba(15, 23, 42, 0.2);
+      pointer-events: none;
+    }
+
+    /* Warning bar for unknown SVG signatures */
+    .alert-bar {
+      margin: 12px 16px 0;
+      padding: 9px 12px;
+      background-color: var(--warn-bg);
+      border: 1px solid var(--warn-border);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--warn-ink);
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+
+    .alert-actions {
+      display: flex;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    /* Main Content Area */
+    .ext-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      flex: 1;
+    }
+
+    /* Tab 1: Overview */
+    .hero-block {
+      padding: 18px 16px 16px;
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .hero-emblem {
+      width: 64px;
+      height: 64px;
+      border-radius: 18px;
+      background-color: var(--accent-tint);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+
+    .hero-emblem img {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: block;
+    }
+
+    .hero-title {
+      font-size: 15.5px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -0.015em;
+    }
+
+    .hero-meta {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--ink-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .hero-meta strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    /* Portal Selector Card */
+    .card {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .field-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-secondary);
+    }
+
+    .select-wrap {
+      position: relative;
+      width: 100%;
+    }
+
+    .select-wrap select {
+      width: 100%;
+      height: 40px;
+      padding: 0 34px 0 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background-color: var(--bg-canvas);
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+
+    .select-wrap select:hover {
+      border-color: #94A3B8;
+      background-color: var(--bg-surface);
+    }
+
+    .select-arrow {
+      position: absolute;
+      right: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--ink-muted);
+      pointer-events: none;
+      display: flex;
+    }
+
+    .spec-grid {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .spec-line {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .spec-k {
+      color: var(--ink-muted);
+      flex-shrink: 0;
+    }
+
+    .spec-v {
+      color: var(--ink);
+      font-weight: 600;
+      text-align: right;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .spec-v.ok {
+      color: var(--success);
+    }
+
+    /* Buttons */
+    .btn-primary {
+      width: 100%;
+      height: 42px;
+      padding: 0 16px;
+      border: none;
+      border-radius: var(--radius-md);
+      background-color: var(--accent);
+      color: #FFFFFF;
+      font-family: inherit;
+      font-size: 13.5px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background-color 0.15s ease, transform 0.12s ease;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--accent-hover);
+    }
+
+    .btn-primary:active {
+      transform: translateY(1px);
+    }
+
+    .btn-secondary {
+      height: 32px;
+      padding: 0 11px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-sm);
+      background-color: var(--bg-surface);
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--bg-subtle);
+      border-color: #94A3B8;
+    }
+
+    .btn-secondary:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* Recent History Compact List */
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .section-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .text-btn {
+      border: none;
+      background: transparent;
+      color: var(--ink-muted);
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+
+    .text-btn:hover:not(:disabled) {
+      color: var(--ink);
+    }
+
+    .text-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .history-list {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .history-item {
+      padding: 7px 0;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .history-name {
+      font-weight: 600;
+      color: var(--ink);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .history-time {
+      color: var(--success);
+      font-weight: 600;
+      flex-shrink: 0;
+      font-size: 11.5px;
+    }
+
+    .empty-note {
+      padding-top: 6px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--ink-muted);
+    }
+
+    /* Tab 2: Portal Directory */
+    .search-input {
+      width: 100%;
+      height: 38px;
+      padding: 0 12px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background-color: var(--bg-surface);
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .search-input::placeholder {
+      color: var(--ink-muted);
+    }
+
+    .filter-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      padding: 3px;
+      background-color: var(--bg-subtle);
+      border-radius: var(--radius-md);
+    }
+
+    .filter-btn {
+      height: 30px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--ink-secondary);
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .filter-btn[aria-pressed="true"] {
+      background-color: var(--bg-surface);
+      color: var(--accent);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    .portal-list {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      max-height: 340px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .portal-row {
+      width: 100%;
+      padding: 10px 12px;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+      text-align: left;
+      font-family: inherit;
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      transition: background-color 0.12s ease;
+    }
+
+    .portal-row:last-child {
+      border-bottom: none;
+    }
+
+    .portal-row:hover {
+      background-color: var(--bg-canvas);
+    }
+
+    .portal-row[aria-current="true"] {
+      background-color: var(--accent-tint);
+    }
+
+    .portal-main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .portal-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .portal-row[aria-current="true"] .portal-name {
+      color: var(--accent-ink);
+    }
+
+    .portal-host {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .portal-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+
+    .portal-engine {
+      font-weight: 600;
+      color: var(--ink-secondary);
+    }
+
+    .portal-status {
+      color: var(--ink-muted);
+    }
+
+    .portal-status.filled {
+      color: var(--success);
+      font-weight: 600;
+    }
+
+    /* Tab 3: SVG Solver */
+    .svg-preview {
+      min-height: 62px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background-color: var(--bg-canvas);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .svg-placeholder {
+      font-size: 11.5px;
+      color: var(--ink-muted);
+      text-align: center;
+    }
+
+    .svg-textarea {
+      width: 100%;
+      height: 104px;
+      padding: 8px 10px;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background-color: var(--bg-canvas);
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      line-height: 1.4;
+      resize: none;
+    }
+
+    .svg-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .svg-actions .btn-primary {
+      height: 36px;
+      font-size: 12.5px;
+      flex: 1;
+    }
+
+    .svg-actions .btn-secondary {
+      height: 36px;
+    }
+
+    .svg-result {
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .svg-code {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: var(--accent);
+    }
+
+    .svg-code.empty {
+      font-family: var(--font-sans);
+      font-size: 12.5px;
+      font-weight: 500;
+      letter-spacing: normal;
+      color: var(--ink-muted);
+    }
+
+    .svg-stats {
+      font-size: 11.5px;
+      color: var(--ink-secondary);
+    }
+
+    /* Compact Extension Footer */
+    .ext-footer {
+      margin-top: auto;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background-color: var(--bg-surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--ink-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="ext-shell">
+    <header class="ext-header">
+      <div class="brand">
+        <img src="icons/icon32.png" alt="" width="26" height="26">
+        <span class="brand-name">CVTax Captcha</span>
+      </div>
+      <span class="header-meta">Tự động chạy</span>
+    </header>
+
+    <div class="ext-tabs" role="tablist" aria-label="Chức năng tiện ích">
+      <button type="button" class="ext-tab" role="tab" id="tab_chinh" data-tab="chinh" aria-selected="true">Tổng quan</button>
+      <button type="button" class="ext-tab" role="tab" id="tab_cong" data-tab="cong" aria-selected="false">Cổng (<span id="tab_dem_cong" class="tabular">0</span>)</button>
+      <button type="button" class="ext-tab" role="tab" id="tab_svg" data-tab="svg" aria-selected="false">Thử SVG</button>
+    </div>
+
+    <div id="bao" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <div id="canh" class="alert-bar" role="status" hidden>
+      <span>Có <strong id="canh_n" class="tabular">0</strong> mẫu SVG mới</span>
+      <div class="alert-actions">
+        <button type="button" id="chep" class="btn-secondary">Chép</button>
+        <button type="button" id="xoa_canh" class="btn-secondary">Xóa</button>
+      </div>
+    </div>
+
+    <!-- Tab 1: Tổng quan (Popup chính) -->
+    <main id="pane_chinh" class="ext-body" role="tabpanel" aria-labelledby="tab_chinh">
+      <section class="hero-block">
+        <div class="hero-emblem">
+          <img src="icons/icon128.png" alt="CVTax" width="48" height="48">
+        </div>
+        <h1 class="hero-title">Tự động giải captcha</h1>
+        <div class="hero-meta tabular">
+          <span id="stat_cong">46 cổng hỗ trợ</span>
+          <span aria-hidden="true">·</span>
+          <span>Đã điền <strong id="stat_lan_dien">0</strong> lần</span>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Cổng đang chọn">
+        <div class="field-label">
+          <label for="cong">Cổng dịch vụ</label>
+          <span id="ct_nhom">Thuế &amp; DVC</span>
+        </div>
+        <div class="select-wrap">
+          <select id="cong" aria-label="Chọn cổng dịch vụ"></select>
+          <span class="select-arrow" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </span>
+        </div>
+
+        <div class="spec-grid">
+          <div class="spec-line">
+            <span class="spec-k">Cơ chế giải</span>
+            <span id="ct_loai" class="spec-v">—</span>
+          </div>
+          <div class="spec-line">
+            <span class="spec-k">Ô captcha</span>
+            <span id="ct_o" class="spec-v mono">—</span>
+          </div>
+          <div class="spec-line">
+            <span class="spec-k">Lần gần nhất</span>
+            <span id="ct_lan" class="spec-v tabular">Sẵn sàng tự động</span>
+          </div>
+        </div>
+      </section>
+
+      <button type="button" id="doc_lai" class="btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 2v6h-6"></path>
+          <path d="M21 13a9 9 0 1 1-3-7.7L21 8"></path>
+        </svg>
+        <span>Đọc lại trên tab đang mở</span>
+      </button>
+
+      <section class="card" aria-label="Hoạt động gần đây">
+        <div class="section-head">
+          <h2 class="section-title">Hoạt động gần đây</h2>
+          <button type="button" id="xoa_lich_su" class="text-btn">Xóa lịch sử</button>
+        </div>
+        <div id="ds_lich_su" class="history-list"></div>
+      </section>
+    </main>
+
+    <!-- Tab 2: Danh sách cổng hỗ trợ -->
+    <section id="pane_cong" class="ext-body" role="tabpanel" aria-labelledby="tab_cong" hidden>
+      <label for="tim_cong" class="sr-only">Tìm cổng dịch vụ</label>
+      <input id="tim_cong" class="search-input" type="search" autocomplete="off" placeholder="Tìm tên cổng hoặc tên miền...">
+
+      <div class="filter-bar" role="group" aria-label="Lọc nhóm cổng">
+        <button type="button" class="filter-btn" data-filter="tat_ca" aria-pressed="true">Tất cả</button>
+        <button type="button" class="filter-btn" data-filter="thue_dvc" aria-pressed="false">Thuế</button>
+        <button type="button" class="filter-btn" data-filter="hoa_don" aria-pressed="false">Hóa đơn</button>
+        <button type="button" class="filter-btn" data-filter="ngan_hang" aria-pressed="false">Ngân hàng</button>
+      </div>
+
+      <div id="ds_cong" class="portal-list" aria-label="Danh sách cổng hỗ trợ"></div>
+    </section>
+
+    <!-- Tab 3: Kiểm thử giải Captcha SVG -->
+    <section id="pane_svg" class="ext-body" role="tabpanel" aria-labelledby="tab_svg" hidden>
+      <div class="card">
+        <div class="section-head">
+          <h2 class="section-title">Kiểm thử lõi giaiSvg</h2>
+          <span class="spec-k">Xử lý cục bộ</span>
+        </div>
+
+        <div id="svg_xem" class="svg-preview" aria-label="Xem trước ảnh SVG">
+          <span class="svg-placeholder">Tạo mẫu SVG thử hoặc dán mã SVG để giải</span>
+        </div>
+
+        <label for="svg_nhap" class="sr-only">Mã SVG captcha</label>
+        <textarea id="svg_nhap" class="svg-textarea" spellcheck="false" placeholder="Dán thẻ <svg>...</svg> từ cổng Hóa đơn điện tử..."></textarea>
+
+        <div class="svg-actions">
+          <button type="button" id="svg_mau" class="btn-primary">Tạo mẫu SVG thử</button>
+          <button type="button" id="svg_xoa" class="btn-secondary">Xóa</button>
+        </div>
+
+        <div class="svg-result" aria-live="polite">
+          <div>
+            <div class="spec-k">Kết quả</div>
+            <div id="svg_kq" class="svg-code empty">Chưa có dữ liệu</div>
+          </div>
+          <span id="svg_chi_so" class="svg-stats tabular">0 / 0 nét</span>
+        </div>
+      </div>
+    </section>
+
+    <footer class="ext-footer">
+      <span id="phien_ban">Phiên bản 2.0.0</span>
+      <span>Xử lý cục bộ · Không đăng nhập</span>
+    </footer>
+  </div>
+
+  <script src="bang_svg.js"></script><script src="giai_svg.js"></script><script src="cau_hinh_cong.js"></script><script src="popup_logic.js"></script><script src="popup.js"></script>
+</body>
+</html>

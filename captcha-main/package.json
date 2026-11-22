@@ -1,0 +1,17 @@
+{
+  "name": "cvtax-captcha-extension",
+  "version": "1.2.0",
+  "description": "CVTax – Tự điền captcha cổng Thuế (Web preview & extension server)",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "node -c server.js && node -c chrome-shim.js && node -c popup_logic.js && node -c popup.js && node -c cau_hinh_cong.js && node -c giai_svg.js && node -c tien_ich_png.js",
+    "lint": "node -c server.js && node -c chrome-shim.js && node -c popup_logic.js && node -c popup.js && node -c background.js && node -c content.js && node -c offscreen.js",
+    "test": "node --test tests/app.test.mjs"
+  },
+  "dependencies": {
+    "express": "^5.3.0"
+  }
+}

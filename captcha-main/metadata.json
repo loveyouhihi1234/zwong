@@ -1,0 +1,5 @@
+{
+  "name": "CVTax – Tự điền captcha cổng Thuế",
+  "description": "Tự điền ô captcha trên cổng Thuế, BHXH, Hải quan, Dịch vụ công và tra cứu hóa đơn. Không đăng nhập thay người dùng.",
+  "requestFramePermissions": []
+}
