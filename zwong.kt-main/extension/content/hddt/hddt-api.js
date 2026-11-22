@@ -304,11 +304,21 @@
     msttcgp: d.msttcgp || '',
   });
 
-  // 1 captcha mới của cổng, giải ngay trên máy (captcha-svg.js). Giữ nguyên hoa/thường như kết quả giải.
+  // 1 captcha mới của cổng, giải ngay trên máy (ưu tiên captcha-svg.js, dự phòng giai_svg.js).
   async function solveCaptcha(shouldStop) {
     const c = await json(await get(URL_CAPTCHA, '', { shouldStop, auth: false }));
     if (!c?.key || !c?.content) throw new Error('Cổng thuế không trả captcha');
-    return { ckey: c.key, cvalue: SvgCaptcha.solve(c.content).text };
+    const primary = typeof SvgCaptcha !== 'undefined' ? SvgCaptcha.solve(c.content) : null;
+    if (primary?.text && primary.confidence >= 80) {
+      return { ckey: c.key, cvalue: primary.text };
+    }
+    if (typeof giaiSvg === 'function') {
+      const secondary = giaiSvg(c.content);
+      if (secondary?.ma && secondary.soDuongChu > 0 && secondary.soNhanDuoc === secondary.soDuongChu) {
+        return { ckey: c.key, cvalue: secondary.ma };
+      }
+    }
+    return { ckey: c.key, cvalue: primary?.text || '' };
   }
   const captchaError = (e) => e instanceof HttpError && (e.status === 400 || CAPTCHA_ERR.test(`${e.raw} ${e.message}`));
 

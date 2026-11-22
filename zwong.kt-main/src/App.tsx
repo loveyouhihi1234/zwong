@@ -19,10 +19,11 @@ import type { PortalLearnedHints } from './utils/portalRules';
 type NavTab = 'sandbox' | 'extension' | 'users' | 'portals' | 'dataset' | 'logs';
 
 interface HealthState {
-  geminiConfigured: boolean;
-  geminiKeyFormatValid: boolean;
+  mode: string;
   model: string;
-  tokenRequired: boolean;
+  onnxReady: boolean;
+  wasmReady: boolean;
+  portalCount: number;
 }
 
 interface StatsState {
@@ -34,12 +35,12 @@ interface StatsState {
 }
 
 const NAV_ITEMS: { id: NavTab; label: string; title: string; icon: typeof FlaskConical }[] = [
-  { id: 'sandbox', label: 'Mô phỏng & Kiểm thử', title: 'Mô phỏng & Kiểm thử Captcha', icon: FlaskConical },
+  { id: 'sandbox', label: 'Mô phỏng & Kiểm thử', title: 'Mô phỏng & Kiểm thử Captcha cục bộ', icon: FlaskConical },
   { id: 'extension', label: 'Tải & Cài Extension', title: 'Đóng gói & Cài đặt Chrome Extension', icon: Download },
   { id: 'users', label: 'Quản lý User', title: 'Quản lý Người dùng & Google Sheets', icon: Users },
-  { id: 'portals', label: '4 Cổng Thuế & DVC', title: 'Quy tắc nhận diện 4 Cổng Thuế & DVC', icon: Globe },
-  { id: 'dataset', label: 'Kho Dữ liệu', title: 'Kho Dữ liệu & Trí nhớ AI (Bước 1–3)', icon: Database },
-  { id: 'logs', label: 'Nhật ký Proxy', title: 'Nhật ký giải Captcha qua Proxy', icon: Activity },
+  { id: 'portals', label: '46 Cổng hỗ trợ', title: 'Quy tắc nhận diện 46 Cổng Thuế, BHXH, Hải quan, Ngân hàng & Hóa đơn', icon: Globe },
+  { id: 'dataset', label: 'Kho Dữ liệu', title: 'Kho Dữ liệu & Trí nhớ cục bộ (Bước 1–3)', icon: Database },
+  { id: 'logs', label: 'Nhật ký Giải mã', title: 'Nhật ký giải Captcha cục bộ', icon: Activity },
 ];
 
 export default function App() {
@@ -47,10 +48,11 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [staticHosting, setStaticHosting] = useState<boolean>(false);
   const [health, setHealth] = useState<HealthState>({
-    geminiConfigured: true,
-    geminiKeyFormatValid: true,
-    model: 'gemini-3.1-flash-lite',
-    tokenRequired: false,
+    mode: 'local-onnx',
+    model: 'ddddocr_old.onnx',
+    onnxReady: true,
+    wasmReady: true,
+    portalCount: 46,
   });
   const [stats, setStats] = useState<StatsState>({
     total: 0,
@@ -98,10 +100,11 @@ export default function App() {
       const data = await res.json();
       setStaticHosting(false);
       setHealth({
-        geminiConfigured: Boolean(data.geminiConfigured),
-        geminiKeyFormatValid: data.geminiKeyFormatValid !== false,
-        model: String(data.model || 'gemini-3.1-flash-lite'),
-        tokenRequired: Boolean(data.tokenRequired),
+        mode: String(data.mode || 'local-onnx'),
+        model: String(data.model || 'ddddocr_old.onnx'),
+        onnxReady: data.onnxReady !== false,
+        wasmReady: data.wasmReady !== false,
+        portalCount: typeof data.portalCount === 'number' ? data.portalCount : 46,
       });
     } catch {
       setStaticHosting(true);
@@ -212,6 +215,8 @@ export default function App() {
     if (tab === 'dataset') loadDataset();
   };
 
+  const solverReady = health.onnxReady && health.wasmReady;
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex">
       {/* Desktop Sidebar */}
@@ -245,9 +250,9 @@ export default function App() {
         <div className="border-t border-slate-200 p-4 text-xs text-slate-500 space-y-1">
           {staticHosting ? (
             <>
-              <div className="font-medium text-slate-700">Chế độ Web tĩnh (GitHub Pages)</div>
+              <div className="font-medium text-slate-700">Chế độ Web tĩnh</div>
               <div>
-                Extension: <span className="text-emerald-700 font-medium">Độc lập 100%</span>
+                Bộ giải: <span className="text-emerald-700 font-medium">SVG + ONNX cục bộ</span>
               </div>
               <div>
                 Quản lý User: <span className="font-medium text-slate-700">Google Sheets</span>
@@ -255,22 +260,18 @@ export default function App() {
             </>
           ) : (
             <>
-              <div className="font-medium text-slate-700">Backend Proxy</div>
+              <div className="font-medium text-slate-700">Bộ giải cục bộ (OFFLINE)</div>
               <div>
                 Model: <span className="font-mono text-slate-800">{health.model}</span>
               </div>
               <div>
-                API Key:{' '}
+                Trạng thái:{' '}
                 <span
                   className={
-                    health.geminiConfigured && health.geminiKeyFormatValid
-                      ? 'text-emerald-700 font-medium'
-                      : 'text-amber-700 font-medium'
+                    solverReady ? 'text-emerald-700 font-medium' : 'text-amber-700 font-medium'
                   }
                 >
-                  {health.geminiConfigured && health.geminiKeyFormatValid
-                    ? 'Đã cấu hình'
-                    : 'Cần kiểm tra Secrets'}
+                  {solverReady ? `Sẵn sàng (${health.portalCount} cổng)` : 'Thiếu tệp .onnx/.wasm'}
                 </span>
               </div>
             </>
@@ -351,17 +352,15 @@ export default function App() {
         <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
           {activeTab === 'sandbox' && (
             <SandboxPanel
-              geminiConfigured={health.geminiConfigured}
-              geminiKeyFormatValid={health.geminiKeyFormatValid}
+              onnxReady={health.onnxReady}
+              wasmReady={health.wasmReady}
               onSolved={() => {
                 loadStats();
                 loadDataset();
               }}
             />
           )}
-          {activeTab === 'extension' && (
-            <ExtensionPackagerPanel tokenRequired={health.tokenRequired} />
-          )}
+          {activeTab === 'extension' && <ExtensionPackagerPanel />}
           {activeTab === 'users' && <UsersAdminPanel />}
           {activeTab === 'portals' && <PortalsPanel />}
           {activeTab === 'dataset' && (

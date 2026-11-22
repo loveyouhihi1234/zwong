@@ -15,6 +15,8 @@ const ESM_MODULE_SCRIPTS = new Set([
   'panels/hoso/panel-hoso.js',
   'panels/hoso/datepicker-hoso.js',
   'panels/hoso/combobox-hoso.js',
+  'thu_vien/ort/ort-wasm-simd-threaded.mjs',
+  'thu_vien/ort/ort.wasm.min.js',
 ]);
 
 test('generatePngIcon returns valid PNG header', () => {
@@ -22,8 +24,10 @@ test('generatePngIcon returns valid PNG header', () => {
   assert.equal(buf.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
 });
 
-test('buildExtensionArtifacts packages unified 3-tab Side Panel extension with HDDT, Hoso, Captcha, and binary fonts', async () => {
-  const { zipBuffer, files } = await buildExtensionArtifacts({});
+test('buildExtensionArtifacts packages unified 3-tab Side Panel extension with 46 portals, ONNX/WASM binaries, and zero Gemini', async () => {
+  const { zipBuffer, files } = await buildExtensionArtifacts({
+    licenseApiUrl: 'https://script.google.com/macros/s/test-deploy/exec',
+  });
 
   const zip = await JSZip.loadAsync(zipBuffer);
   assert.ok(zip.file('manifest.json'));
@@ -41,30 +45,55 @@ test('buildExtensionArtifacts packages unified 3-tab Side Panel extension with H
     assert.equal(bytes.length > 1000, true, `Binary asset looks empty: ${rel}`);
   }
 
+  // Verify embedded ONNX model and WASM runtime sizes
+  const onnxBytes = await zip.file('thu_vien/ddddocr_old.onnx')!.async('uint8array');
+  const wasmBytes = await zip.file('thu_vien/ort/ort-wasm-simd-threaded.wasm')!.async('uint8array');
+  assert.equal(onnxBytes.length > 5_000_000, true, 'ddddocr_old.onnx should be full model binary');
+  assert.equal(wasmBytes.length > 5_000_000, true, 'ort-wasm-simd-threaded.wasm should be full WASM binary');
+  assert.equal(
+    wasmBytes[0] === 0x00 && wasmBytes[1] === 0x61 && wasmBytes[2] === 0x73 && wasmBytes[3] === 0x6d,
+    true,
+    'WASM binary must start with magic bytes \\0asm',
+  );
+
   const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
   assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.version, '2.1.0');
   assert.equal(manifest.side_panel?.default_path, 'sidepanel.html');
   assert.equal(manifest.action?.default_popup, undefined);
   assert.equal(manifest.permissions.includes('storage'), true);
   assert.equal(manifest.permissions.includes('alarms'), true);
   assert.equal(manifest.permissions.includes('sidePanel'), true);
   assert.equal(manifest.permissions.includes('downloads'), true);
-  assert.equal(manifest.host_permissions.includes('https://generativelanguage.googleapis.com/*'), true);
+  assert.equal(manifest.permissions.includes('offscreen'), true);
+  assert.equal(
+    manifest.content_security_policy?.extension_pages?.includes("'wasm-unsafe-eval'"),
+    true,
+    'CSP must allow wasm-unsafe-eval for local ONNX WASM',
+  );
+
+  // Zero Gemini host permissions
+  assert.equal(
+    manifest.host_permissions.includes('https://generativelanguage.googleapis.com/*'),
+    false,
+    'Gemini API host permission must be completely removed',
+  );
   assert.equal(manifest.host_permissions.includes('https://script.google.com/*'), true);
+  assert.equal(manifest.host_permissions.length >= 45, true, 'Expected host_permissions for all 46 portals + Google Sheets');
+
   assert.equal(
     manifest.web_accessible_resources?.[0]?.resources?.includes('content/fonts/*.ttf'),
     true,
   );
 
-  // Verify shared SVG captcha solver is injected ONCE on hoadondientu alongside HDDT downloader
+  // Verify HDDT content script injects BOTH Tier-1 SVG (captcha-svg.js) and Tier-2 SVG (bang_svg.js + giai_svg.js) once
   const hddtRule = manifest.content_scripts.find((s: { matches: string[] }) =>
     s.matches.includes('https://hoadondientu.gdt.gov.vn/*'),
   );
   assert.ok(hddtRule);
-  assert.equal(
-    hddtRule.js.filter((f: string) => f.includes('captcha-svg.js')).length,
-    1,
-  );
+  assert.equal(hddtRule.js.filter((f: string) => f.includes('captcha-svg.js')).length, 1);
+  assert.equal(hddtRule.js.includes('content/bang_svg.js'), true);
+  assert.equal(hddtRule.js.includes('content/giai_svg.js'), true);
   assert.equal(hddtRule.js.includes('content/hddt/hddt-content.js'), true);
   assert.equal(hddtRule.js.includes('content/hddt.js'), true);
 
@@ -76,6 +105,17 @@ test('buildExtensionArtifacts packages unified 3-tab Side Panel extension with H
   assert.equal(dvcRule.js.includes('content/dvc.js'), true);
   assert.equal(dvcRule.js.includes('content/hoso/hoso-content.js'), true);
 
+  // Verify extended portals content script rule covers BHXH, Hải quan, Ngân hàng, NCC Hóa đơn
+  const extRule = manifest.content_scripts.find((s: { js: string[] }) =>
+    s.js.includes('content/extended-portals.js'),
+  );
+  assert.ok(extRule, 'Missing content_scripts entry for content/extended-portals.js');
+  assert.equal(extRule.js.includes('content/cau_hinh_cong.js'), true);
+  assert.equal(extRule.js.includes('content/common.js'), true);
+  assert.equal(extRule.matches.includes('https://baohiemxahoi.gov.vn/*'), true);
+  assert.equal(extRule.matches.includes('https://einvoice.vietcombank.com.vn/*'), true);
+  assert.equal(extRule.matches.includes('https://*.vnpt-invoice.com.vn/*'), true);
+
   // Verify exact top-level tab order in sidepanel.html: Tải HĐĐT -> Tải Hồ sơ -> Captcha
   const sidepanelHtml = await zip.file('sidepanel.html')!.async('string');
   const idxHddt = sidepanelHtml.indexOf('data-main-tab="hddt"');
@@ -83,16 +123,20 @@ test('buildExtensionArtifacts packages unified 3-tab Side Panel extension with H
   const idxCaptcha = sidepanelHtml.indexOf('data-main-tab="captcha"');
   assert.equal(idxHddt > 0 && idxHoso > idxHddt && idxCaptcha > idxHoso, true);
 
-  // Verify global license guard is wired in background.js for downloads and license checks
+  // Verify global license guard & local ONNX offscreen solver in background.js (and zero Gemini calls)
   const backgroundJs = await zip.file('background.js')!.async('string');
   assert.equal(backgroundJs.includes('TAXCAP_CHECK_LICENSE'), true);
   assert.equal(backgroundJs.includes('TAXCAP_DOWNLOAD_FILE'), true);
+  assert.equal(backgroundJs.includes('TAXCAP_SOLVE_ONNX'), true);
   assert.equal(backgroundJs.includes('openPanelOnActionClick: true'), true);
+  assert.equal(backgroundJs.includes('generativelanguage.googleapis.com'), false);
 
   const configJs = await zip.file('config.js')!.async('string');
-  assert.equal(configJs.includes('"connectionMode": "direct"'), true);
-  assert.equal(configJs.includes('"speedMode": "fast"'), true);
-  assert.equal(configJs.includes('"licenseApiUrl":'), true);
+  assert.equal(configJs.includes('"solverMode": "local-onnx"'), true);
+  assert.equal(configJs.includes('https://script.google.com/macros/s/test-deploy/exec'), true);
+  assert.equal(configJs.includes('"ext_gov": true'), true);
+  assert.equal(configJs.includes('"ext_bank": true'), true);
+  assert.equal(configJs.includes('"ext_invoice": true'), true);
 
   // Syntax-check every classic JS script bundled into the extension
   for (const file of files) {
@@ -102,25 +146,8 @@ test('buildExtensionArtifacts packages unified 3-tab Side Panel extension with H
   }
 });
 
-test('buildExtensionArtifacts still supports optional proxy mode with host_permissions and accessToken', async () => {
-  const { zipBuffer } = await buildExtensionArtifacts({
-    connectionMode: 'proxy',
-    apiBaseUrl: 'https://taxcap-proxy.example.com/',
-    accessToken: 'team-secret-123',
-  });
-
-  const zip = await JSZip.loadAsync(zipBuffer);
-  const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
-  assert.equal(manifest.host_permissions.includes('https://taxcap-proxy.example.com/*'), true);
-
-  const configJs = await zip.file('config.js')!.async('string');
-  assert.equal(configJs.includes('"connectionMode": "proxy"'), true);
-  assert.equal(configJs.includes('https://taxcap-proxy.example.com'), true);
-  assert.equal(configJs.includes('team-secret-123'), true);
-});
-
 test('all TAXCAP_* runtime messages sent by sidepanel, panels, and content scripts are handled by background.js', async () => {
-  const { files } = await buildExtensionArtifacts({});
+  const { files } = await buildExtensionArtifacts({ includeZip: false });
   const bg = files.find((f) => f.path === 'background.js')?.content || '';
   const sidepanel = files.find((f) => f.path === 'sidepanel.js')?.content || '';
 
@@ -148,40 +175,44 @@ test('all TAXCAP_* runtime messages sent by sidepanel, panels, and content scrip
   }
 });
 
-test('v2.0.2 UI & reliability guarantees: no banners, HDDT log visible + instant abort, Hoso 4 presets, Captcha dedupe', async () => {
-  const { zipBuffer, files } = await buildExtensionArtifacts({});
-  const zip = await JSZip.loadAsync(zipBuffer);
+test('UI & reliability guarantees preserved: HDDT log visible + instant abort, Hoso 4 presets, Captcha dedupe & 3-tier HDDT', async () => {
+  const { files } = await buildExtensionArtifacts({ includeZip: false });
+  const get = (p: string) => files.find((f) => f.path === p)?.content || '';
 
-  const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
-  assert.equal(manifest.version, '2.0.2');
-
-  const hddtHtml = await zip.file('panels/hddt/index.html')!.async('string');
+  const hddtHtml = get('panels/hddt/index.html');
   assert.equal(hddtHtml.includes('class="notice"'), false, 'HDDT yellow update notice must be removed');
   assert.equal(hddtHtml.includes('id="jobArea"'), true, 'HDDT Nhật ký section must exist');
   assert.equal(hddtHtml.includes('id="log"'), true, 'HDDT log list must exist');
 
-  const hddtCss = await zip.file('panels/hddt/panel-hddt.css')!.async('string');
+  const hddtCss = get('panels/hddt/panel-hddt.css');
   assert.equal(hddtCss.includes('.job:has(#log:empty)'), false, 'HDDT Nhật ký must not hide when empty');
 
-  const hddtApi = files.find((f) => f.path === 'content/hddt/hddt-api.js')?.content || '';
-  const hddtContent = files.find((f) => f.path === 'content/hddt/hddt-content.js')?.content || '';
-  const hddtPanelJs = files.find((f) => f.path === 'panels/hddt/panel-hddt.js')?.content || '';
+  const hddtApi = get('content/hddt/hddt-api.js');
+  const hddtContent = get('content/hddt/hddt-content.js');
+  const hddtPanelJs = get('panels/hddt/panel-hddt.js');
   assert.equal(hddtApi.includes('abortActive'), true, 'HDDT API must expose abortActive()');
+  assert.equal(hddtApi.includes('giaiSvg'), true, 'HDDT API must include Tier-2 giaiSvg fallback');
   assert.equal(hddtContent.includes("msg.type === 'hddt-stop'"), true, 'HDDT port must handle hddt-stop');
   assert.equal(hddtPanelJs.includes('Đang dừng…'), true, 'HDDT Stop button must show immediate Đang dừng… feedback');
 
-  const hosoHtml = await zip.file('panels/hoso/index.html')!.async('string');
+  const hosoHtml = get('panels/hoso/index.html');
   assert.equal(hosoHtml.includes('class="privacy"'), false, 'Hoso privacy box must be removed');
   assert.equal(hosoHtml.includes('Cam kết không thu thập dữ liệu'), false);
 
-  const hosoPanelJs = files.find((f) => f.path === 'panels/hoso/panel-hoso.js')?.content || '';
+  const hosoPanelJs = get('panels/hoso/panel-hoso.js');
   for (const label of ["'Tháng này'", "'Tháng trước'", "'Quý trước'", "'Năm nay'"]) {
     assert.equal(hosoPanelJs.includes(label), true, `Hoso presets missing ${label}`);
   }
   assert.equal(hosoPanelJs.includes("'12 tháng qua'"), false, 'Hoso old 12 tháng qua preset must be removed');
 
-  const commonJs = files.find((f) => f.path === 'content/common.js')?.content || '';
+  const commonJs = get('content/common.js');
   assert.equal(commonJs.includes('window.__taxcapCommonLoaded'), true, 'common.js must guard against duplicate load');
   assert.equal(commonJs.includes('taxcapExtId'), true, 'common.js must tag and dedupe same-extension widgets');
-});
+  assert.equal(commonJs.includes('taxcapReadRawRgba'), true, 'common.js must capture raw RGBA for ONNX');
 
+  const captchaPanelHtml = get('panels/captcha/index.html');
+  assert.equal(captchaPanelHtml.includes('geminiApiKey'), false, 'Captcha panel must not contain Gemini API Key input');
+  assert.equal(captchaPanelHtml.includes('ext_gov'), true, 'Captcha panel must include ext_gov group toggle');
+  assert.equal(captchaPanelHtml.includes('ext_bank'), true, 'Captcha panel must include ext_bank group toggle');
+  assert.equal(captchaPanelHtml.includes('ext_invoice'), true, 'Captcha panel must include ext_invoice group toggle');
+});

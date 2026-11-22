@@ -93,7 +93,8 @@
       .lic-cell-label { font-size: 10px; color: #64748b; }
       .lic-cell-val { font-size: 11.5px; font-weight: 600; color: #0f172a; margin-top: 1px; }
       details.subtle-details {
-        margin-bottom: 8px;
+        margin-top: 6px;
+        margin-bottom: 4px;
         font-size: 11px;
         color: #475569;
       }
@@ -101,6 +102,42 @@
         cursor: pointer;
         margin-bottom: 6px;
         font-weight: 600;
+      }
+      .domain-list {
+        max-height: 165px;
+        overflow-y: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        background: #f8fafc;
+        padding: 6px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .domain-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        font-size: 10.5px;
+        border-bottom: 1px solid #f1f5f9;
+        padding-bottom: 3px;
+      }
+      .domain-row:last-child { border-bottom: none; padding-bottom: 0; }
+      .domain-host {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #0f172a;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .domain-tag {
+        flex-shrink: 0;
+        font-size: 9.5px;
+        color: #475569;
+        background: #e2e8f0;
+        border-radius: 4px;
+        padding: 1px 5px;
       }
       .tab-panel { padding: 10px 12px 14px; }
       .hidden { display: none !important; }
@@ -128,6 +165,7 @@
         justify-content: space-between;
         padding: 4px 0;
         cursor: pointer;
+        gap: 8px;
       }
       .pause-row {
         display: grid;
@@ -173,26 +211,6 @@
         color: #334155;
         margin-bottom: 4px;
       }
-      .key-wrap {
-        position: relative;
-        margin-bottom: 8px;
-      }
-      .key-wrap input {
-        margin-bottom: 0;
-        padding-right: 52px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 12px;
-      }
-      .reveal-btn {
-        position: absolute;
-        right: 4px;
-        top: 50%;
-        transform: translateY(-50%);
-        padding: 2px 6px;
-        font-size: 11px;
-        border-color: #e2e8f0;
-        background: #f8fafc;
-      }
       .status { margin-top: 6px; font-size: 11.5px; color: #475569; }
       .status.ok { color: #15803d; font-weight: 500; }
       .status.err { color: #b91c1c; font-weight: 500; }
@@ -207,23 +225,6 @@
         border: 1px solid #fcd34d;
         background: #fffbeb;
         color: #92400e;
-        font-size: 11.5px;
-      }
-      .alert-warn button, .alert-ok button {
-        white-space: nowrap;
-        flex-shrink: 0;
-      }
-      .alert-ok {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 7px 11px;
-        margin-bottom: 10px;
-        border-radius: 8px;
-        border: 1px solid #a7f3d0;
-        background: #ecfdf5;
-        color: #065f46;
         font-size: 11.5px;
       }
       .stats { display: flex; gap: 20px; font-variant-numeric: tabular-nums; }
@@ -405,7 +406,6 @@
         color: #64748b;
         font-size: 11.5px;
       }
-      .hint { font-size: 11px; color: #64748b; margin: -4px 0 8px; }
       .mem-bar {
         display: flex;
         align-items: center;
@@ -424,7 +424,7 @@
       <div class="header-top">
         <div>
           <div class="brand">TaxCap Captcha</div>
-          <div class="sub">Chạy độc lập · Chỉ điền sẵn, không tự gửi</div>
+          <div class="sub">Giải cục bộ 100% (SVG + ONNX) · Không tự gửi form</div>
         </div>
         <label class="toggle" id="enabledToggleWrap">
           <input type="checkbox" id="enabledToggle" />
@@ -473,22 +473,17 @@
         <div class="section-title">Thông tin thiết bị &amp; bảo mật</div>
         <div class="sub" style="line-height:1.5;">
           • Mã máy này: <code class="mono" id="activateDeviceId">—</code><br />
-          • Sau khi mở khóa, Extension tự giải SVG &amp; gọi thẳng Gemini độc lập, chỉ đồng bộ Google Sheets mỗi <strong>15 phút</strong> hoặc đủ <strong>10 lượt</strong>.
+          • Sau khi mở khóa, Extension giải captcha hoàn toàn cục bộ trên máy bằng <strong>SVG + ONNX (ddddocr)</strong>, chỉ đồng bộ bản quyền Google Sheets mỗi <strong>15 phút</strong> hoặc đủ <strong>10 lượt</strong>.
         </div>
       </div>
     </section>
 
-    <!-- TAB 1: CAPTCHA (Nhiệm vụ chính hằng ngày) -->
+    <!-- TAB 1: CAPTCHA -->
     <main id="panel-captcha" class="tab-panel">
-      <div id="connBanner" class="alert-warn hidden">
-        <span id="connBannerText">Chưa nhập Gemini API Key</span>
-        <button type="button" class="sm" id="goConfigBtn">Cài đặt ngay</button>
-      </div>
-
       <div class="section">
         <div class="section-title">
           <span>Hôm nay</span>
-          <span id="activeModeChip" class="sub">Độc lập (Gemini)</span>
+          <span id="activeModeChip" class="sub">Cục bộ · SVG + ONNX</span>
         </div>
         <div class="stats">
           <div>
@@ -508,28 +503,41 @@
       </div>
 
       <div class="section">
-        <div class="section-title">Cổng áp dụng</div>
-        <label class="row"><span>Hóa đơn điện tử (SVG &lt;5ms + Gemini)</span><input type="checkbox" data-portal="hddt" /></label>
-        <label class="row"><span>Thuế điện tử (eTax)</span><input type="checkbox" data-portal="tdt" /></label>
-        <label class="row"><span>Dịch vụ công (DVC)</span><input type="checkbox" data-portal="dvc" /></label>
-        <label class="row"><span>Tra cứu NNT</span><input type="checkbox" data-portal="tracuunnt" /></label>
+        <div class="section-title">
+          <span>4 cổng Thuế chính</span>
+          <span class="sub">SVG 3 tầng &amp; ONNX</span>
+        </div>
+        <label class="row"><span>Hóa đơn điện tử (SVG &lt;5ms → ONNX)</span><input type="checkbox" data-portal="hddt" /></label>
+        <label class="row"><span>Thuế điện tử (eTax · ONNX)</span><input type="checkbox" data-portal="tdt" /></label>
+        <label class="row"><span>Dịch vụ công Thuế (DVC · ONNX)</span><input type="checkbox" data-portal="dvc" /></label>
+        <label class="row"><span>Tra cứu NNT (ONNX)</span><input type="checkbox" data-portal="tracuunnt" /></label>
       </div>
 
       <div class="section">
-        <div class="section-title">Tùy chọn đọc nhanh</div>
-        <label class="field-label" for="speedModeSelect">Mô hình đọc ảnh</label>
-        <select id="speedModeSelect">
-          <option value="fast">Tốc độ cao (Flash Lite — khuyên dùng)</option>
-          <option value="accurate">Độ chính xác cao (Gemini 4 Flash)</option>
-        </select>
-        <label class="row" style="padding-bottom:0;">
-          <span>Làm nét &amp; lọc nhiễu ảnh trước khi đọc</span>
-          <input type="checkbox" id="enhanceToggle" />
+        <div class="section-title">
+          <span id="extGroupTitle">Cổng mở rộng</span>
+          <span class="sub" id="extTotalBadge">ONNX cục bộ</span>
+        </div>
+        <label class="row">
+          <span id="extGovLabel">Thuế · BHXH · Hải quan · DVCQG</span>
+          <input type="checkbox" data-portal="ext_gov" />
         </label>
+        <label class="row">
+          <span id="extBankLabel">Hóa đơn Ngân hàng</span>
+          <input type="checkbox" data-portal="ext_bank" />
+        </label>
+        <label class="row">
+          <span id="extInvoiceLabel">Tra cứu Hóa đơn NCC &amp; Doanh nghiệp</span>
+          <input type="checkbox" data-portal="ext_invoice" />
+        </label>
+        <details class="subtle-details" id="extDomainsDetails">
+          <summary id="extDomainsSummary">Xem danh sách tên miền mở rộng</summary>
+          <div class="domain-list" id="extDomainList"></div>
+        </details>
       </div>
     </main>
 
-    <!-- TAB 2: CẤU HÌNH (Bản quyền, API Key Gemini & Kiểm tra kết nối) -->
+    <!-- TAB 2: CẤU HÌNH -->
     <section id="panel-config" class="tab-panel hidden">
       <div class="section">
         <div class="section-title">
@@ -566,35 +574,16 @@
       </div>
 
       <div class="section">
-        <div class="section-title">Kết nối Gemini API</div>
-        <label class="field-label" for="connectionModeSelect">Kiểu kết nối</label>
-        <select id="connectionModeSelect">
-          <option value="direct">Độc lập 100% — Dùng Gemini API Key (Không cần server)</option>
-          <option value="proxy">Qua Backend Proxy (Nếu dùng server riêng)</option>
-        </select>
-
-        <div id="directFields">
-          <label class="field-label" for="geminiKeyInput">Gemini API Key</label>
-          <div class="key-wrap">
-            <input type="password" id="geminiKeyInput" placeholder="Dán Gemini API Key (AIza...)" autocomplete="off" />
-            <button type="button" class="reveal-btn" id="toggleKeyBtn">Hiện</button>
-          </div>
-          <div class="hint">
-            Lưu cục bộ trên Chrome · Lấy key miễn phí tại <code class="mono">aistudio.google.com/apikey</code>
-          </div>
+        <div class="section-title">
+          <span>Bộ giải cục bộ (SVG + ONNX WASM)</span>
+          <span class="badge verified">100% Offline</span>
         </div>
-
-        <div id="proxyFields" class="hidden">
-          <label class="field-label" for="apiBaseInput">URL Backend Proxy</label>
-          <input type="text" id="apiBaseInput" placeholder="https://your-proxy-url..." />
-          <label class="field-label" for="tokenInput">Mã truy cập nhóm (nếu có)</label>
-          <input type="password" id="tokenInput" placeholder="Để trống nếu không đặt mật khẩu" />
+        <div class="sub" style="line-height:1.55;margin-bottom:8px;">
+          • <strong>HĐĐT:</strong> SVG mẫu (&lt;5ms) → SVG chữ ký nét → ONNX (<code class="mono">ddddocr_old.onnx</code>)<br />
+          • <strong>Các cổng ảnh PNG/JPEG:</strong> Chạy ONNX Runtime WASM trực tiếp trên máy, không cần API Key, không gửi ảnh ra mạng.<br />
+          • <strong>Phạm vi:</strong> <span id="configPortalCount">46 cổng</span> (Thuế, BHXH, Hải quan, DVCQG, Ngân hàng &amp; NCC Hóa đơn).
         </div>
-
-        <div style="display:flex;gap:6px;">
-          <button type="button" class="primary" id="saveBtn" style="flex:1;">Lưu cấu hình</button>
-          <button type="button" id="pingBtn">Kiểm tra</button>
-        </div>
+        <button type="button" class="primary" id="pingBtn" style="width:100%;">Kiểm tra nạp mô hình ONNX</button>
         <div class="status" id="pingStatus"></div>
 
         <div class="mem-bar">
@@ -604,14 +593,14 @@
       </div>
 
       <div class="section">
-        <div class="section-title">Cơ chế tự học cục bộ</div>
+        <div class="section-title">Trí nhớ phản hồi cục bộ</div>
         <div class="sub" style="line-height:1.5;">
-          Mỗi lần bạn xác nhận hoặc sửa tay mã captcha trên trang Thuế (hoặc trong tab <strong>Kho dữ liệu</strong>), ảnh mẫu và cặp chữ hay nhầm được lưu vĩnh viễn vào <code class="mono">chrome.storage.local</code> trên máy bạn.
+          Mỗi lần bạn xác nhận hoặc sửa tay mã captcha trên trang Thuế (hoặc trong tab <strong>Kho dữ liệu</strong>), ảnh mẫu và nhãn chuẩn được lưu vào <code class="mono">chrome.storage.local</code> để trả tức thì nếu gặp lại đúng ảnh đó.
         </div>
       </div>
     </section>
 
-    <!-- TAB 3: KHO DỮ LIỆU (Giống Kho Dữ liệu của TaxCap Studio) -->
+    <!-- TAB 3: KHO DỮ LIỆU -->
     <section id="panel-dataset" class="tab-panel hidden">
       <div class="kpi-grid">
         <div class="kpi-card">
@@ -634,8 +623,8 @@
 
       <div class="section">
         <div class="section-title">
-          <span>Tiến độ &amp; Kinh nghiệm theo cổng</span>
-          <span class="sub">Mục tiêu 500/cổng</span>
+          <span>Tiến độ &amp; Độ chính xác theo cổng</span>
+          <span class="sub">Lưu cục bộ</span>
         </div>
         <div id="dsPortalsGrid" class="portal-grid"></div>
       </div>
@@ -648,6 +637,7 @@
             <option value="tdt">Thuế ĐT</option>
             <option value="dvc">DVC Thuế</option>
             <option value="tracuunnt">Tra cứu NNT</option>
+            <option value="extended">Cổng mở rộng</option>
           </select>
           <div style="display:flex;gap:4px;">
             <button type="button" class="sm" id="dsRefreshBtn">Làm mới</button>
@@ -659,7 +649,7 @@
       </div>
     </section>
 
-    <!-- TAB 4: NHẬT KÝ (Giống Nhật ký Proxy của TaxCap Studio) -->
+    <!-- TAB 4: NHẬT KÝ -->
     <section id="panel-logs" class="tab-panel hidden">
       <div class="kpi-grid">
         <div class="kpi-card">
@@ -689,6 +679,7 @@
               <option value="tdt">Thuế ĐT</option>
               <option value="dvc">DVC Thuế</option>
               <option value="tracuunnt">Tra cứu NNT</option>
+              <option value="extended">Cổng mở rộng</option>
             </select>
             <div class="pill-group" id="logStatusPills">
               <button type="button" class="pill-btn active" data-status="all">Tất cả</button>
@@ -708,6 +699,7 @@
     <script src="../../config.js"></script>
     <script src="../../direct-gemini.js"></script>
     <script src="../../license.js"></script>
+    <script src="../../content/cau_hinh_cong.js"></script>
     <script src="panel-captcha.js"></script>
   </body>
 </html>

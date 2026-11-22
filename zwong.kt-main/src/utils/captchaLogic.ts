@@ -22,7 +22,7 @@ export const PORTALS: Record<PortalId, PortalMeta> = {
     imageMode: 'svg-raster',
     imgSelector: 'img[alt="captcha"]',
     inputSelector: 'input[id="cvalue"], input[id$="_cvalue"]',
-    notes: 'Tầng 0: so khớp mẫu SVG trong trình duyệt (<5ms, không cần API); nếu độ tin cậy <80% hoặc đổi sang ảnh PNG sẽ tự fallback sang Trí nhớ / ONNX / Gemini.',
+    notes: 'Chuỗi 3 tầng cục bộ: SVG mẫu (<5ms) → SVG chữ ký nét M/Q/Z → ONNX (ddddocr_old.onnx), không cần API Key.',
   },
   tdt: {
     id: 'tdt',
@@ -33,7 +33,7 @@ export const PORTALS: Record<PortalId, PortalMeta> = {
     imageMode: 'canvas-png',
     imgSelector: 'img#safecode',
     inputSelector: 'input#vcode[name="_verifyCode"]',
-    notes: 'Đọc pixel trực tiếp từ DOM qua canvas.drawImage ngay từ document_end để không gọi lại servlet làm đổi mã phiên.',
+    notes: 'Đọc pixel RGBA nguyên bản từ DOM → tiền xử lý LANCZOS 64px → giải cục bộ bằng ONNX (ddddocr_old.onnx).',
   },
   dvc: {
     id: 'dvc',
@@ -44,7 +44,7 @@ export const PORTALS: Record<PortalId, PortalMeta> = {
     imageMode: 'canvas-png',
     imgSelector: 'img[id^="image-capt"]',
     inputSelector: 'input[name="captcha"], input[name="captchaCbt"]',
-    notes: 'Chỉ giải cặp img + input đang hiển thị (checkVisibility) trong cùng form hoặc modal đang mở.',
+    notes: 'Chỉ giải cặp img + input đang hiển thị (checkVisibility) bằng ONNX cục bộ trong cùng form hoặc modal đang mở.',
   },
   tracuunnt: {
     id: 'tracuunnt',
@@ -53,9 +53,9 @@ export const PORTALS: Record<PortalId, PortalMeta> = {
     host: 'tracuunnt.gdt.gov.vn',
     pathHint: '/tcnnt/mstdn.jsp & /tcnnt/mstcn.jsp',
     imageMode: 'canvas-png',
-    imgSelector: 'img[src^="/tcnnt/captcha.png"]',
-    inputSelector: 'input[name="captcha"]',
-    notes: 'Ghép cặp theo từng form tra cứu doanh nghiệp hoặc cá nhân đang hiển thị.',
+    imgSelector: 'img[src*="captcha.png"]',
+    inputSelector: 'input#captcha, input[name="captcha"]',
+    notes: 'Ghép nền trắng cho PNG trong suốt và giải cục bộ bằng ONNX (ddddocr_old.onnx) theo từng form đang hiển thị.',
   },
 };
 

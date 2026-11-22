@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { RotateCw, Trash2 } from 'lucide-react';
-import { PORTALS, type PortalId } from '../utils/captchaLogic';
+import { getPortalDisplayName } from '../utils/allPortals';
 
 export interface SolveLogItem {
   id: string;
   timestamp: string;
-  portal: PortalId;
+  portal: string;
   status: 'ok' | 'error';
   codeMasked: string;
   latencyMs: number;
@@ -24,6 +24,8 @@ interface LogsPanelProps {
   onGoToSandbox: () => void;
 }
 
+const MAIN_PORTAL_SET = new Set(['hddt', 'tdt', 'dvc', 'tracuunnt']);
+
 export const LogsPanel: React.FC<LogsPanelProps> = ({
   total,
   successCount,
@@ -35,12 +37,16 @@ export const LogsPanel: React.FC<LogsPanelProps> = ({
   onClear,
   onGoToSandbox,
 }) => {
-  const [portalFilter, setPortalFilter] = useState<'all' | PortalId>('all');
+  const [portalFilter, setPortalFilter] = useState<'all' | 'hddt' | 'tdt' | 'dvc' | 'tracuunnt' | 'extended'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'error'>('all');
 
   const filteredLogs = useMemo(() => {
     return logs.filter((item) => {
-      if (portalFilter !== 'all' && item.portal !== portalFilter) return false;
+      if (portalFilter === 'extended') {
+        if (MAIN_PORTAL_SET.has(item.portal)) return false;
+      } else if (portalFilter !== 'all' && item.portal !== portalFilter) {
+        return false;
+      }
       if (statusFilter !== 'all' && item.status !== statusFilter) return false;
       return true;
     });
@@ -53,7 +59,7 @@ export const LogsPanel: React.FC<LogsPanelProps> = ({
       {/* Compact KPI Row */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3.5">
-          <div className="text-xs text-slate-500">Tổng lượt gọi</div>
+          <div className="text-xs text-slate-500">Tổng lượt giải</div>
           <div className="mt-1 font-mono text-xl font-semibold tabular-nums text-slate-900">{total}</div>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3.5">
@@ -84,7 +90,11 @@ export const LogsPanel: React.FC<LogsPanelProps> = ({
             <select
               id="log-portal-filter"
               value={portalFilter}
-              onChange={(e) => setPortalFilter(e.target.value as 'all' | PortalId)}
+              onChange={(e) =>
+                setPortalFilter(
+                  e.target.value as 'all' | 'hddt' | 'tdt' | 'dvc' | 'tracuunnt' | 'extended',
+                )
+              }
               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-sky-600 focus:outline-none"
             >
               <option value="all">Tất cả cổng</option>
@@ -92,6 +102,7 @@ export const LogsPanel: React.FC<LogsPanelProps> = ({
               <option value="tdt">Thuế ĐT</option>
               <option value="dvc">DVC Thuế</option>
               <option value="tracuunnt">Tra cứu NNT</option>
+              <option value="extended">42 cổng mở rộng</option>
             </select>
 
             <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-0.5">
@@ -139,16 +150,16 @@ export const LogsPanel: React.FC<LogsPanelProps> = ({
           </div>
         ) : filteredLogs.length === 0 ? (
           <div className="px-6 py-12 text-center space-y-3">
-            <p className="text-sm font-medium text-slate-800">Chưa có lượt gọi Proxy nào được ghi nhận</p>
+            <p className="text-sm font-medium text-slate-800">Chưa có lượt giải captcha nào được ghi nhận</p>
             <p className="text-xs text-slate-500">
-              Hãy thử đọc một ảnh captcha trong Mô phỏng & Kiểm thử hoặc cài Extension để thấy nhật ký thực tế tại đây.
+              Hãy thử giải một ảnh captcha cục bộ trong Mô phỏng &amp; Kiểm thử để thấy nhật ký thực tế tại đây.
             </p>
             <button
               type="button"
               onClick={onGoToSandbox}
               className="rounded-lg bg-sky-700 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-800"
             >
-              Mở Mô phỏng & Kiểm thử
+              Mở Mô phỏng &amp; Kiểm thử
             </button>
           </div>
         ) : (
@@ -171,7 +182,7 @@ export const LogsPanel: React.FC<LogsPanelProps> = ({
                       {new Date(item.timestamp).toLocaleTimeString('vi-VN')}
                     </td>
                     <td className="px-4 py-2.5 font-medium text-slate-800 whitespace-nowrap">
-                      {PORTALS[item.portal]?.shortName || item.portal}
+                      {getPortalDisplayName(item.portal)}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
                       <span

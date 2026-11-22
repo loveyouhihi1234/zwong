@@ -22,6 +22,8 @@
 
   window.taxcapWatchCaptchas({
     portal: "dvc",
+    settingKey: "dvc",
+    cong: "dichvucong",
     findPairs,
     readImage: window.taxcapReadCanvasImage,
   });

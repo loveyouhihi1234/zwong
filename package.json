@@ -1,0 +1,13 @@
+{
+  "name": "taxcap-studio-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "postinstall": "npm --prefix zwong.kt-main install",
+    "dev": "npm --prefix zwong.kt-main run dev",
+    "build": "npm --prefix zwong.kt-main run build",
+    "start": "npm --prefix zwong.kt-main run start",
+    "lint": "npm --prefix zwong.kt-main run lint"
+  }
+}

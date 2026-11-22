@@ -26,6 +26,7 @@
         status: "idle",
         attempts: 0,
         lastKey: null,
+        lastSource: "",
         solving: false,
         lastSampleId: "",
         predictedCode: "",
@@ -155,7 +156,6 @@
       onManualRetry();
     });
 
-    // Chèn ngay sau wrapper của AntD/Bootstrap nếu có, tránh lọt vào trong flex input-group
     anchor.insertAdjacentElement("afterend", host);
 
     widget = { host, msgEl, retryBtn, iconEl };
@@ -185,113 +185,17 @@
   }
 
   function canvasToCompactDataUrl(canvas) {
-    const webp = canvas.toDataURL("image/webp", 0.88);
+    const webp = canvas.toDataURL("image/webp", 0.86);
     if (webp.startsWith("data:image/webp")) return webp;
-    return canvas.toDataURL("image/jpeg", 0.9);
-  }
-
-  function enhanceCanvasPixels(ctx, width, height) {
-    try {
-      const imgData = ctx.getImageData(0, 0, width, height);
-      const data = imgData.data;
-      const total = width * height;
-      if (!total) return;
-
-      const lum = new Uint8Array(total);
-      const hist = new Uint32Array(256);
-      for (let i = 0; i < total; i++) {
-        const p = i * 4;
-        const alpha = data[p + 3];
-        let l;
-        if (alpha < 24) {
-          l = 255;
-        } else {
-          const a = alpha / 255;
-          const r = data[p] * a + 255 * (1 - a);
-          const g = data[p + 1] * a + 255 * (1 - a);
-          const b = data[p + 2] * a + 255 * (1 - a);
-          l = Math.max(0, Math.min(255, Math.round(0.299 * r + 0.587 * g + 0.114 * b)));
-        }
-        lum[i] = l;
-        hist[l] += 1;
-      }
-
-      const lowTarget = Math.max(1, Math.floor(total * 0.08));
-      const highTarget = Math.max(lowTarget + 1, Math.floor(total * 0.72));
-      let cum = 0;
-      let darkFloor = 0;
-      let bgCeiling = 255;
-      let foundLow = false;
-      for (let v = 0; v < 256; v++) {
-        cum += hist[v];
-        if (!foundLow && cum >= lowTarget) {
-          darkFloor = v;
-          foundLow = true;
-        }
-        if (cum >= highTarget) {
-          bgCeiling = v;
-          break;
-        }
-      }
-
-      const cutoff = Math.min(248, Math.round(bgCeiling * 0.92));
-      const span = cutoff - darkFloor;
-      const gray = new Uint8Array(total);
-      if (span < 16) {
-        for (let i = 0; i < total; i++) {
-          gray[i] = lum[i] > 235 ? 255 : lum[i];
-        }
-      } else {
-        for (let i = 0; i < total; i++) {
-          const l = lum[i];
-          if (l >= cutoff) {
-            gray[i] = 255;
-          } else {
-            const norm = Math.max(0, Math.min(1, (l - darkFloor) / span));
-            gray[i] = Math.round(10 + Math.pow(norm, 1.15) * 226);
-          }
-        }
-      }
-
-      const cleaned = new Uint8Array(gray);
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          const idx = y * width + x;
-          const val = gray[idx];
-          if (val > 130 && val < 255) {
-            let whiteNeighbors = 0;
-            if (gray[idx - width - 1] >= 245) whiteNeighbors++;
-            if (gray[idx - width] >= 245) whiteNeighbors++;
-            if (gray[idx - width + 1] >= 245) whiteNeighbors++;
-            if (gray[idx - 1] >= 245) whiteNeighbors++;
-            if (gray[idx + 1] >= 245) whiteNeighbors++;
-            if (gray[idx + width - 1] >= 245) whiteNeighbors++;
-            if (gray[idx + width] >= 245) whiteNeighbors++;
-            if (gray[idx + width + 1] >= 245) whiteNeighbors++;
-            if (whiteNeighbors >= 7) cleaned[idx] = 255;
-          }
-        }
-      }
-
-      for (let i = 0; i < total; i++) {
-        const p = i * 4;
-        const v = cleaned[i];
-        data[p] = v;
-        data[p + 1] = v;
-        data[p + 2] = v;
-        data[p + 3] = 255;
-      }
-      ctx.putImageData(imgData, 0, 0);
-    } catch {
-      // Giữ ảnh gốc nếu trình duyệt chặn đọc pixel
-    }
+    return canvas.toDataURL("image/jpeg", 0.88);
   }
 
   /**
-   * Đọc trực tiếp pixel từ thẻ <img> đang render (không fetch lại URL để tránh mất session).
-   * Phóng đại 1.85x trên nền trắng, lọc nhiễu + tăng tương phản (Bước 2) và nén WebP/JPEG nhẹ.
+   * Đọc pixel RGBA nguyên bản (không biến đổi alpha / tương phản) để QltPng.tienXuLy
+   * xử lý chính xác 100% theo chuẩn Pillow LANCZOS của ddddocr_old.onnx.
    */
-  async function readCanvasImage(img, enhance = true) {
+  async function readRawRgba(img) {
+    if (!img || img.tagName !== "IMG") return null;
     if (!img.complete) {
       await new Promise((resolve) => {
         img.addEventListener("load", resolve, { once: true });
@@ -302,21 +206,53 @@
     const w = img.naturalWidth || img.width;
     const h = img.naturalHeight || img.height;
     if (!w || !h) return null;
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, w, h);
+      const px = ctx.getImageData(0, 0, w, h).data;
+      return { px, w, h };
+    } catch {
+      return null;
+    }
+  }
+
+  function imagePixelSig(raw) {
+    if (!raw || !raw.px) return "";
+    let h = 2166136261;
+    const d = raw.px;
+    for (let i = 0; i < d.length; i++) {
+      h = Math.imul(h ^ d[i], 16777619);
+    }
+    return `${raw.w}x${raw.h}:${h >>> 0}`;
+  }
+
+  /**
+   * Tạo ảnh thu nhỏ nhẹ để hiển thị trong tab Kho dữ liệu (không gửi ra mạng).
+   */
+  async function readCanvasImage(img) {
+    if (!img || img.tagName !== "IMG") return null;
+    if (!img.complete) {
+      await new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+        setTimeout(resolve, 1500);
+      });
+    }
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return null;
 
     try {
-      const scale = w < 220 ? 1.85 : 1;
       const canvas = document.createElement("canvas");
-      canvas.width = Math.round(w * scale);
-      canvas.height = Math.round(h * scale);
-      const ctx = canvas.getContext("2d", enhance ? { willReadFrequently: true } : undefined);
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      if (enhance) {
-        enhanceCanvasPixels(ctx, canvas.width, canvas.height);
-      }
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
       return canvasToCompactDataUrl(canvas);
     } catch {
       return null;
@@ -332,10 +268,17 @@
     return (h >>> 0).toString(36);
   }
 
-  function imageKeyFor(img) {
-    const src = img.currentSrc || img.getAttribute("src") || "";
-    if (!src) return "";
-    return `${hashString(src)}:${src.length}:${img.naturalWidth}x${img.naturalHeight}`;
+  function imageKeyFor(el) {
+    if (!el) return "";
+    if (el.tagName === "IMG") {
+      const src = el.currentSrc || el.getAttribute("src") || "";
+      if (!src) return "";
+      return `${hashString(src)}:${src.length}:${el.naturalWidth}x${el.naturalHeight}`;
+    }
+    const txt = String(el.textContent || "").replace(/\s+/g, "");
+    if (txt) return `txt:${hashString(txt)}:${txt.length}`;
+    if (el.outerHTML) return `el:${hashString(el.outerHTML)}:${el.outerHTML.length}`;
+    return "";
   }
 
   async function getPortalSettings() {
@@ -348,7 +291,7 @@
     if (!settings) {
       try {
         const res = await chrome.storage.local.get("taxcapSettings");
-        settings = res?.taxcapSettings || { enabled: true, pausedUntil: 0, enhanceImage: true, portals: {} };
+        settings = res?.taxcapSettings || { enabled: true, pausedUntil: 0, portals: {} };
       } catch {
         return null;
       }
@@ -356,25 +299,36 @@
     return settings;
   }
 
-  function isSettingsPortalActive(settings, portal) {
+  function isSettingsPortalActive(settings, settingKey) {
     if (!settings?.licenseGate?.unlocked) return false;
     if (!settings?.enabled) return false;
     if (Date.now() < (settings.pausedUntil || 0)) return false;
-    return settings.portals?.[portal] !== false;
+    return settings.portals?.[settingKey] !== false;
   }
 
-  window.taxcapWatchCaptchas = function ({ portal, findPairs, readImage = readCanvasImage, tryLocalSolve = null }) {
+  window.taxcapWatchCaptchas = function ({
+    portal,
+    settingKey,
+    cong,
+    findPairs,
+    readImage = readCanvasImage,
+    tryLocalSolve = null,
+  }) {
+    const gateKey = settingKey || portal;
+    const solverCong = cong || portal;
     let scanTimer = null;
 
-    async function solvePair(img, input, manual = false, enhance = true) {
+    async function solvePair(img, input, manual = false) {
       const st = getState(input);
-      ensureWidget(input, async () => {
-        const latestSettings = await getPortalSettings();
-        solvePair(img, input, true, latestSettings?.enhanceImage !== false);
+      ensureWidget(input, () => {
+        solvePair(img, input, true);
       });
 
       const key = imageKeyFor(img);
       if (!key) return;
+
+      const prevKey = st.lastKey;
+      const prevSource = st.lastSource;
 
       if (manual) {
         if (st.lastSampleId && !st.feedbackSent) {
@@ -404,28 +358,34 @@
       st.predictedCode = "";
       st.feedbackSent = false;
 
-      // Tầng 0 (vd. SVG mẫu font cho HĐĐT): giải tức thì trong trình duyệt khi chạy tự động;
-      // bấm Giải lại (manual) hoặc trả về null sẽ tự động chuyển sang Proxy (Trí nhớ / ONNX / Gemini).
-      if (!manual && typeof tryLocalSolve === "function") {
+      // Tầng cục bộ tức thì (HĐĐT SVG Tầng 1/2, cổng văn bản/SVG chữ):
+      // Bấm "Giải lại" ngay sau svg-local trên cùng ảnh sẽ bỏ qua Tầng 1 để kiểm tra chéo sang Tầng 2/ONNX.
+      if (typeof tryLocalSolve === "function") {
         let localRes = null;
         try {
-          localRes = tryLocalSolve(img);
+          localRes = tryLocalSolve(img, {
+            manual,
+            skipTier1: manual && prevKey === key && prevSource === "svg-local",
+            skipSvgTiers: manual && prevKey === key && prevSource === "svg-sig",
+          });
         } catch {
           localRes = null;
         }
         if (localRes?.captcha) {
           fillInputSafely(input, localRes.captcha);
           st.predictedCode = localRes.captcha;
+          st.lastSource = localRes.source || "svg-local";
           st.status = "filled";
           st.solving = false;
           renderWidget(input, st);
 
-          // Ghi nhận thống kê & lưu mẫu vào Kho Dữ liệu (không chặn luồng điền, không báo lỗi nếu Proxy tắt)
-          Promise.resolve(readImage(img, enhance))
+          Promise.resolve(readImage(img))
             .then((compactImage) =>
               chrome.runtime.sendMessage({
                 type: "TAXCAP_RECORD_LOCAL",
                 portal,
+                cong: solverCong,
+                source: localRes.source || "svg-local",
                 captcha: localRes.captcha,
                 confidence: localRes.confidence,
                 latencyMs: localRes.latencyMs,
@@ -442,27 +402,47 @@
         }
       }
 
+      // Tầng ONNX cục bộ (ddddocr_old.onnx chạy trong offscreen document)
       st.status = "reading";
       st.solving = true;
       renderWidget(input, st);
 
       try {
-        const compactImage = await readImage(img, enhance);
-        if (!compactImage) {
+        const raw = await readRawRgba(img);
+        if (!raw) {
           st.status = st.attempts >= MAX_AUTO_RETRIES ? "locked" : "failed";
           st.errorText = "Không đọc được ảnh captcha";
           return;
         }
+        const pixelSig = imagePixelSig(raw);
+        const thumbnail = (await readImage(img)) || "";
+
         const res = await chrome.runtime.sendMessage({
-          type: "TAXCAP_SOLVE",
+          type: "TAXCAP_SOLVE_ONNX",
           portal,
-          image: compactImage,
+          cong: solverCong,
+          rgba: Array.from(raw.px),
+          w: raw.w,
+          h: raw.h,
+          sig: pixelSig,
+          image: thumbnail,
           bypassCache: manual,
         });
+
+        // Bỏ qua kết quả nếu ảnh captcha đã bị đổi trong lúc đang chạy ONNX
+        if (imageKeyFor(img) !== key) {
+          return;
+        }
+        const latestRaw = await readRawRgba(img);
+        if (latestRaw && imagePixelSig(latestRaw) !== pixelSig) {
+          return;
+        }
+
         if (res?.ok && res.captcha) {
           fillInputSafely(input, res.captcha);
           st.lastSampleId = res.sampleId || "";
           st.predictedCode = res.captcha;
+          st.lastSource = res.source || "onnx-local";
           st.feedbackSent = false;
           st.status = "filled";
         } else {
@@ -480,17 +460,16 @@
 
     async function scan() {
       const settings = await getPortalSettings();
-      if (!isSettingsPortalActive(settings, portal)) return;
-      const enhance = settings?.enhanceImage !== false;
+      if (!isSettingsPortalActive(settings, gateKey)) return;
       const pairs = findPairs();
       for (const { img, input } of pairs) {
-        solvePair(img, input, false, enhance);
+        solvePair(img, input, false);
       }
     }
 
     const scheduleScan = () => {
       clearTimeout(scanTimer);
-      scanTimer = setTimeout(scan, 60);
+      scanTimer = setTimeout(scan, 80);
     };
 
     const observer = new MutationObserver(scheduleScan);
@@ -498,17 +477,23 @@
       childList: true,
       subtree: true,
       attributes: true,
+      characterData: true,
       attributeFilter: ["src", "style", "class"],
     });
 
-    document.addEventListener("load", (e) => {
-      if (e.target instanceof HTMLImageElement) scheduleScan();
-    }, true);
+    document.addEventListener(
+      "load",
+      (e) => {
+        if (e.target instanceof HTMLImageElement) scheduleScan();
+      },
+      true,
+    );
 
-    // Chạy ngay khi document_end để giải song song trong lúc người dùng nhập MST/mật khẩu
     scan();
     setTimeout(scan, 450);
   };
 
+  window.taxcapReadRawRgba = readRawRgba;
+  window.taxcapImagePixelSig = imagePixelSig;
   window.taxcapReadCanvasImage = readCanvasImage;
 })();

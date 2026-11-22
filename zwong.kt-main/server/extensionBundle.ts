@@ -11,7 +11,7 @@ const CRC_TABLE = (() => {
   for (let n = 0; n < 256; n++) {
     let c = n;
     for (let k = 0; k < 8; k++) {
-      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
     }
     table[n] = c >>> 0;
   }
@@ -105,10 +105,13 @@ export interface ExtensionFilePreview {
 }
 
 export const UNIFIED_EXTENSION_TEXT_FILES = [
-  // Lõi & Side Panel hợp nhất
+  // Lõi, Side Panel & Offscreen ONNX cục bộ
   'direct-gemini.js',
   'license.js',
   'background.js',
+  'offscreen.html',
+  'offscreen.js',
+  'tien_ich_png.js',
   'sidepanel.html',
   'sidepanel.js',
   'icons/hddt-logo.svg',
@@ -132,16 +135,26 @@ export const UNIFIED_EXTENSION_TEXT_FILES = [
   'panels/hoso/combobox-hoso.js',
   'content/hoso/gdt-api.js',
   'content/hoso/hoso-content.js',
-  // Tab 3: Giải Captcha (4 cổng + bộ giải SVG dùng chung)
+  // Tab 3: Giải Captcha cục bộ (46 cổng + SVG 2 tầng + ONNX WASM)
   'panels/captcha/index.html',
   'panels/captcha/panel-captcha.js',
   'content/captcha-svg-templates.js',
   'content/captcha-svg.js',
+  'content/bang_svg.js',
+  'content/giai_svg.js',
+  'content/cau_hinh_cong.js',
   'content/common.js',
   'content/hddt.js',
   'content/tdt.js',
   'content/dvc.js',
   'content/tracuunnt.js',
+  'content/extended-portals.js',
+  // Thư viện cục bộ (bảng ký tự, ONNX Runtime Web JS loader, bản quyền)
+  'thu_vien/charset.json',
+  'thu_vien/LICENSE_ddddocr.txt',
+  'thu_vien/ort/LICENSE',
+  'thu_vien/ort/ort.wasm.min.js',
+  'thu_vien/ort/ort-wasm-simd-threaded.mjs',
   // Bản quyền font đi kèm
   'content/fonts/LICENSE',
   'panels/shared/fonts/LICENSE',
@@ -153,53 +166,26 @@ export const UNIFIED_EXTENSION_BINARY_FILES = [
   'content/fonts/pdf-italic.ttf',
   'panels/shared/fonts/roboto-latin-wght-normal.woff2',
   'panels/shared/fonts/roboto-vietnamese-wght-normal.woff2',
+  'thu_vien/ddddocr_old.onnx',
+  'thu_vien/ort/ort-wasm-simd-threaded.wasm',
 ] as const;
 
-function normalizeOriginPattern(apiBaseUrl: string): string | null {
-  try {
-    const u = new URL(apiBaseUrl);
-    return `${u.protocol}//${u.host}/*`;
-  } catch {
-    return null;
-  }
-}
-
 export async function buildExtensionArtifacts(options: {
-  connectionMode?: 'direct' | 'proxy';
-  apiBaseUrl?: string;
-  accessToken?: string;
   licenseApiUrl?: string;
+  includeZip?: boolean;
 }): Promise<{ zipBuffer: Buffer; files: ExtensionFilePreview[] }> {
-  const connectionMode = options.connectionMode === 'proxy' ? 'proxy' : 'direct';
-  const cleanUrl =
-    connectionMode === 'proxy'
-      ? (options.apiBaseUrl || '').trim().replace(/\/+$/, '') || 'http://localhost:3000'
-      : '';
-  const cleanToken = connectionMode === 'proxy' ? (options.accessToken || '').trim() : '';
   const cleanLicenseUrl = (options.licenseApiUrl || '').trim().replace(/\/+$/, '');
+  const includeZip = options.includeZip !== false;
 
   const manifestRaw = await fs.readFile(path.join(EXTENSION_DIR, 'manifest.json'), 'utf8');
   const manifestObj = JSON.parse(manifestRaw);
-  if (connectionMode === 'proxy') {
-    const proxyPattern = normalizeOriginPattern(cleanUrl);
-    if (proxyPattern && Array.isArray(manifestObj.host_permissions)) {
-      if (!manifestObj.host_permissions.includes(proxyPattern)) {
-        manifestObj.host_permissions.push(proxyPattern);
-      }
-    }
-  }
   const manifestContent = JSON.stringify(manifestObj, null, 2);
 
-  const configContent = `// Cấu hình tạo tự động từ TaxCap Studio
+  const configContent = `// Cấu hình tạo tự động từ TaxCap Studio (giải cục bộ 100% bằng SVG + ONNX WASM)
 self.TAXCAP_DEFAULTS = ${JSON.stringify(
     {
-      connectionMode,
-      geminiApiKey: '',
+      solverMode: 'local-onnx',
       licenseApiUrl: cleanLicenseUrl,
-      apiBaseUrl: cleanUrl,
-      accessToken: cleanToken,
-      speedMode: 'fast',
-      enhanceImage: true,
       enabled: true,
       pausedUntil: 0,
       portals: {
@@ -207,6 +193,9 @@ self.TAXCAP_DEFAULTS = ${JSON.stringify(
         tdt: true,
         dvc: true,
         tracuunnt: true,
+        ext_gov: true,
+        ext_bank: true,
+        ext_invoice: true,
       },
     },
     null,
@@ -214,28 +203,37 @@ self.TAXCAP_DEFAULTS = ${JSON.stringify(
   )};
 `;
 
-  const zip = new JSZip();
   const previews: ExtensionFilePreview[] = [
     { path: 'manifest.json', content: manifestContent },
     { path: 'config.js', content: configContent },
   ];
 
-  zip.file('manifest.json', manifestContent);
-  zip.file('config.js', configContent);
+  const zip = includeZip ? new JSZip() : null;
+  if (zip) {
+    zip.file('manifest.json', manifestContent);
+    zip.file('config.js', configContent);
+  }
 
   for (const rel of UNIFIED_EXTENSION_TEXT_FILES) {
     const content = await fs.readFile(path.join(EXTENSION_DIR, rel), 'utf8');
-    zip.file(rel, content);
+    if (zip) {
+      zip.file(rel, content);
+    }
     previews.push({ path: rel, content });
+  }
+
+  if (!zip) {
+    return { zipBuffer: Buffer.alloc(0), files: previews };
   }
 
   for (const rel of UNIFIED_EXTENSION_BINARY_FILES) {
     const buf = await fs.readFile(path.join(EXTENSION_DIR, rel));
-    zip.file(rel, buf);
+    // Dùng STORE cho nhị phân lớn (.onnx/.wasm/.woff2/.ttf) để đóng gói nhanh tức thì
+    zip.file(rel, buf, { compression: 'STORE' });
   }
 
-  zip.file('icons/icon-48.png', generatePngIcon(48));
-  zip.file('icons/icon-128.png', generatePngIcon(128));
+  zip.file('icons/icon-48.png', generatePngIcon(48), { compression: 'STORE' });
+  zip.file('icons/icon-128.png', generatePngIcon(128), { compression: 'STORE' });
 
   const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
   return { zipBuffer, files: previews };

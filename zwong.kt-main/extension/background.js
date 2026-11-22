@@ -9,10 +9,11 @@ const LICENSE_KEY = "taxcapLicense";
 const DEVICE_ID_KEY = "taxcapDeviceId";
 const PENDING_SOLVES_KEY = "taxcapPendingSolves";
 const PAUSE_ALARM = "taxcap-resume";
-const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const OFFSCREEN_URL = "offscreen.html";
 
 const pendingMemoryMap = new Map();
 let inFlightLicenseSync = null;
+let creatingOffscreen = null;
 
 // Mở Side Panel khi bấm icon (dự phòng mở cửa sổ riêng cho Chrome cũ / Cốc Cốc)
 if (chrome.sidePanel?.setPanelBehavior) {
@@ -28,30 +29,64 @@ if (chrome.sidePanel?.setPanelBehavior) {
   });
 }
 
-function normalizeApiKey(raw) {
-  return String(raw || "").trim().replace(/^["']+|["']+$/g, "");
-}
-
-function resolveConnectionMode(settings) {
-  if (settings?.connectionMode === "proxy") return "proxy";
-  if (settings?.connectionMode === "direct") return "direct";
-  return settings?.apiBaseUrl ? "proxy" : "direct";
-}
-
 async function getSettings() {
   const res = await chrome.storage.local.get(SETTINGS_KEY);
   const saved = res[SETTINGS_KEY] || {};
-  const merged = {
+  return {
     ...self.TAXCAP_DEFAULTS,
     ...saved,
+    solverMode: "local-onnx",
     portals: {
       ...self.TAXCAP_DEFAULTS.portals,
       ...(saved.portals || {}),
     },
   };
-  merged.connectionMode = resolveConnectionMode(merged);
-  merged.geminiApiKey = normalizeApiKey(merged.geminiApiKey);
-  return merged;
+}
+
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen) {
+    throw new Error("Trình duyệt chưa hỗ trợ Offscreen Document để chạy ONNX cục bộ.");
+  }
+  if (typeof chrome.runtime.getContexts === "function") {
+    const existing = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [chrome.runtime.getURL(OFFSCREEN_URL)],
+    });
+    if (existing && existing.length > 0) return;
+  }
+  if (!creatingOffscreen) {
+    creatingOffscreen = chrome.offscreen
+      .createDocument({
+        url: OFFSCREEN_URL,
+        reasons: ["WORKERS"],
+        justification: "Chạy mô hình ONNX (ddddocr_old.onnx) giải captcha cục bộ không gửi ảnh ra ngoài.",
+      })
+      .catch((err) => {
+        if (!/Only a single offscreen document/i.test(String(err?.message || err))) {
+          throw err;
+        }
+      })
+      .finally(() => {
+        creatingOffscreen = null;
+      });
+  }
+  await creatingOffscreen;
+}
+
+function sendToOffscreen(payload) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(payload, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, loi: chrome.runtime.lastError.message || "Lỗi liên lạc Offscreen ONNX" });
+          return;
+        }
+        resolve(response || { ok: false, loi: "Offscreen ONNX không phản hồi" });
+      });
+    } catch (err) {
+      resolve({ ok: false, loi: String(err?.message || err || "Lỗi Offscreen ONNX") });
+    }
+  });
 }
 
 async function ensureDeviceId() {
@@ -133,9 +168,10 @@ async function refreshLicenseIfNeeded(options = {}) {
     return { state: current, evaluation: localEval };
   }
   if (!licenseKey || !licenseApiUrl) {
-    const updated = !licenseApiUrl && licenseKey
-      ? { ...current, licenseKey, lastError: "Chưa nhập URL Google Apps Script." }
-      : current;
+    const updated =
+      !licenseApiUrl && licenseKey
+        ? { ...current, licenseKey, lastError: "Chưa nhập URL Google Apps Script." }
+        : current;
     return { state: updated, evaluation: self.TaxCapLicense.evaluateLocalLicense(updated) };
   }
 
@@ -329,29 +365,44 @@ async function takePendingSolve(sampleId) {
   return null;
 }
 
-function isAisDevPreviewUrl(url) {
-  return /^https:\/\/ais-dev-/i.test(String(url || "").trim());
-}
-
-async function solveDirectGemini(portal, image, bypassCache, settings) {
+async function handleSolveOnnx(msg) {
   const started = Date.now();
-  const parsed = self.TaxCapDirect.parseImageDataUrl(image);
-  if (!parsed) {
+  const portal = self.TaxCapDirect.normalizePortalId(msg?.portal || msg?.cong || "hddt");
+  const cong = String(msg?.cong || portal);
+  const bypassCache = Boolean(msg?.bypassCache);
+  const thumbnail = typeof msg?.image === "string" ? msg.image : "";
+
+  const gate = await ensureLicenseUnlocked();
+  if (!gate.ok) {
+    return {
+      ok: false,
+      licenseLocked: true,
+      message: gate.message,
+    };
+  }
+
+  const rgba = msg?.rgba;
+  const w = Number(msg?.w) || 0;
+  const h = Number(msg?.h) || 0;
+  if (!Array.isArray(rgba) || w <= 0 || h <= 0 || rgba.length !== w * h * 4) {
     await bumpStats(false);
-    await updateBadge(false);
     await pushSolveLog({
       portal,
       status: "error",
       latencyMs: Date.now() - started,
-      message: "Ảnh captcha không hợp lệ",
+      message: "Dữ liệu pixel ảnh captcha không hợp lệ",
     });
-    return { ok: false, message: "Ảnh captcha không hợp lệ" };
+    return { ok: false, message: "Không đọc được ảnh captcha" };
   }
 
-  const imageHash = self.TaxCapDirect.hashBase64Quick(`${parsed.mimeType}:${parsed.data}`);
-  const memoryState = await loadLocalMemory();
+  const parsedThumb = self.TaxCapDirect.parseImageDataUrl(thumbnail);
+  const imageHash =
+    String(msg?.sig || "") ||
+    (parsedThumb ? self.TaxCapDirect.hashBase64Quick(`${parsedThumb.mimeType}:${parsedThumb.data}`) : "");
 
-  if (!bypassCache) {
+  // Kiểm tra trí nhớ cục bộ trước (nếu người dùng đã xác nhận/sửa ảnh giống hệt)
+  if (!bypassCache && imageHash) {
+    const memoryState = await loadLocalMemory();
     const cachedLabel = self.TaxCapDirect.getExactMemoryMatch(memoryState, portal, imageHash);
     if (cachedLabel) {
       const sampleId = `local:${crypto.randomUUID()}`;
@@ -360,8 +411,6 @@ async function solveDirectGemini(portal, image, bypassCache, settings) {
         portal,
         predicted: cachedLabel,
         imageHash,
-        mimeType: parsed.mimeType,
-        base64Data: parsed.data,
       });
       await appendSampleRecord({
         sampleId,
@@ -369,7 +418,7 @@ async function solveDirectGemini(portal, image, bypassCache, settings) {
         source: "memory-local",
         predicted: cachedLabel,
         latencyMs,
-        imageDataUrl: image,
+        imageDataUrl: thumbnail,
         imageHash,
       });
       await pushSolveLog({
@@ -379,6 +428,7 @@ async function solveDirectGemini(portal, image, bypassCache, settings) {
         latencyMs,
         message: "Trí nhớ cục bộ (<5ms)",
       });
+      await recordLicensedSolve();
       await bumpStats(true);
       await updateBadge(false);
       return {
@@ -391,8 +441,9 @@ async function solveDirectGemini(portal, image, bypassCache, settings) {
     }
   }
 
-  const apiKey = normalizeApiKey(settings.geminiApiKey);
-  if (!apiKey) {
+  try {
+    await ensureOffscreenDocument();
+  } catch (err) {
     const latencyMs = Date.now() - started;
     await bumpStats(false);
     await updateBadge(true);
@@ -400,293 +451,71 @@ async function solveDirectGemini(portal, image, bypassCache, settings) {
       portal,
       status: "error",
       latencyMs,
-      message: "Chưa nhập Gemini API Key",
+      message: err?.message || "Không khởi tạo được Offscreen ONNX",
+    });
+    return { ok: false, message: "Không khởi tạo được bộ giải ONNX cục bộ" };
+  }
+
+  const offRes = await sendToOffscreen({
+    loai: "offscreen_giai",
+    cong,
+    rgba,
+    w,
+    h,
+  });
+
+  const latencyMs = Math.max(1, Date.now() - started);
+  const captcha = self.TaxCapDirect.sanitizeCaptchaText(String(offRes?.ma || ""));
+
+  if (!offRes?.ok || !captcha) {
+    await bumpStats(false);
+    await updateBadge(false);
+    await pushSolveLog({
+      portal,
+      status: "error",
+      latencyMs,
+      message: offRes?.loi ? `ONNX cục bộ: ${offRes.loi}` : "ONNX cục bộ chưa đọc được mã",
     });
     return {
       ok: false,
-      network: true,
-      message: "Chưa nhập Gemini API Key — mở tab Cấu hình để dán key",
+      message: "Không đọc được, bấm thử lại",
+      latencyMs,
     };
   }
 
-  const speedMode = settings.speedMode === "accurate" ? "accurate" : "fast";
-  const model = self.TaxCapDirect.resolveDirectModel(speedMode);
-  const hints = self.TaxCapDirect.getAdaptiveHints(memoryState, portal);
-  const fewShots = self.TaxCapDirect.getFewShotExamples(memoryState, portal, {
-    speedMode,
-    bypassCache,
-  });
-  const body = self.TaxCapDirect.buildGeminiRequestBody({
+  const sampleId = `local:${crypto.randomUUID()}`;
+  await savePendingSolve(sampleId, {
     portal,
-    parsedImage: parsed,
-    speedMode,
-    hints,
-    fewShots,
+    predicted: captcha,
+    imageHash,
   });
+  await appendSampleRecord({
+    sampleId,
+    portal,
+    source: "onnx-local",
+    predicted: captcha,
+    latencyMs,
+    imageDataUrl: thumbnail,
+    imageHash,
+  });
+  await pushSolveLog({
+    portal,
+    status: "ok",
+    code: captcha,
+    latencyMs,
+    message: `ONNX cục bộ (ddddocr · ${latencyMs}ms)`,
+  });
+  await recordLicensedSolve();
+  await bumpStats(true);
+  await updateBadge(false);
 
-  const attempt = async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort("timeout"), 15000);
-    try {
-      const response = await fetch(`${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const errMsg = String(data?.error?.message || "");
-        const isInvalidKey =
-          response.status === 400 ||
-          response.status === 401 ||
-          response.status === 403 ||
-          /API[_\s]?KEY|PERMISSION_DENIED|UNAUTHENTICATED/i.test(errMsg);
-        if (isInvalidKey) {
-          return {
-            ok: false,
-            retryable: false,
-            network: true,
-            message: "Gemini API Key chưa hợp lệ — mở tab Cấu hình để kiểm tra",
-          };
-        }
-        if (response.status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(errMsg)) {
-          return {
-            ok: false,
-            retryable: false,
-            network: false,
-            message: "Hết hạn mức Gemini API (429) — chờ vài giây rồi thử lại",
-          };
-        }
-        return {
-          ok: false,
-          retryable: response.status >= 500,
-          network: response.status >= 500,
-          message: `Lỗi Gemini API (${response.status})`,
-        };
-      }
-
-      const captcha = self.TaxCapDirect.extractGeminiCaptchaText(data);
-      if (!captcha) {
-        return {
-          ok: false,
-          retryable: false,
-          message: "Không đọc được, bấm thử lại",
-        };
-      }
-
-      const sampleId = `local:${crypto.randomUUID()}`;
-      const latencyMs = Date.now() - started;
-      await savePendingSolve(sampleId, {
-        portal,
-        predicted: captcha,
-        imageHash,
-        mimeType: parsed.mimeType,
-        base64Data: parsed.data,
-      });
-      await appendSampleRecord({
-        sampleId,
-        portal,
-        source: model,
-        predicted: captcha,
-        latencyMs,
-        imageDataUrl: image,
-        imageHash,
-      });
-
-      return {
-        ok: true,
-        captcha,
-        sampleId,
-        source: "direct-gemini",
-        latencyMs,
-        learnedCount: hints?.usableCount || 0,
-        fewShotCount: fewShots.length,
-      };
-    } catch {
-      return {
-        ok: false,
-        retryable: true,
-        network: true,
-        message: "Không kết nối được tới Google Gemini API",
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+  return {
+    ok: true,
+    captcha,
+    sampleId,
+    source: "onnx-local",
+    latencyMs,
   };
-
-  let result = await attempt();
-  if (!result.ok && result.retryable) {
-    await new Promise((r) => setTimeout(r, 650));
-    result = await attempt();
-  }
-
-  const latencyMs = result.latencyMs || Date.now() - started;
-  if (result.ok) {
-    const modeLabel = speedMode === "accurate" ? "Flash 4" : "Flash Lite";
-    const enhanceTag = settings.enhanceImage !== false ? " · Làm nét" : "";
-    const learnedTag = result.learnedCount > 0 ? ` · Học ${result.learnedCount} mẫu` : "";
-    const fsTag = result.fewShotCount > 0 ? ` · ${result.fewShotCount} ảnh mẫu` : "";
-    await pushSolveLog({
-      portal,
-      status: "ok",
-      code: result.captcha,
-      latencyMs,
-      message: `Đọc thành công (${modeLabel}${enhanceTag}${learnedTag}${fsTag})`,
-    });
-  } else {
-    await pushSolveLog({
-      portal,
-      status: "error",
-      latencyMs,
-      message: result.message || "Lỗi đọc Gemini",
-    });
-  }
-
-  await bumpStats(result.ok);
-  await updateBadge(Boolean(result.network));
-  return result;
-}
-
-async function callSolveProxy(portal, image, bypassCache, settings) {
-  const started = Date.now();
-  const baseUrl = String(settings.apiBaseUrl || "").replace(/\/+$/, "");
-  if (!baseUrl) {
-    return { ok: false, message: "Chưa cấu hình URL Backend Proxy" };
-  }
-  if (isAisDevPreviewUrl(baseUrl)) {
-    return {
-      ok: false,
-      message: "URL ais-dev bị khóa cookie AI Studio — hãy chuyển sang chế độ Độc lập (API Key)",
-    };
-  }
-
-  const speedMode = settings.speedMode === "accurate" ? "accurate" : "fast";
-  const enhanced = settings.enhanceImage !== false;
-  const headers = { "Content-Type": "application/json" };
-  if (settings.accessToken) {
-    headers["X-Extension-Token"] = settings.accessToken;
-  }
-
-  const attempt = async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort("timeout"), 12000);
-    try {
-      const response = await fetch(`${baseUrl}/api/captcha/solve`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          portal,
-          image,
-          speedMode,
-          enhanced,
-          bypassCache: Boolean(bypassCache),
-        }),
-        signal: controller.signal,
-      });
-      const ct = response.headers.get("content-type") || "";
-      if (response.redirected || !ct.includes("application/json")) {
-        return {
-          ok: false,
-          retryable: false,
-          network: true,
-          message: "Proxy bị chặn bởi trang xác thực (nên chuyển sang chế độ Độc lập)",
-        };
-      }
-      const data = await response.json().catch(() => ({}));
-      if (response.ok && data.ok && data.captcha) {
-        return {
-          ok: true,
-          captcha: data.captcha,
-          sampleId: data.sampleId || "",
-          latencyMs: data.latencyMs,
-          source: data.source || "proxy",
-        };
-      }
-      return {
-        ok: false,
-        status: response.status,
-        retryable: response.status >= 500,
-        message: data.message || `Lỗi máy chủ (${response.status})`,
-      };
-    } catch {
-      return {
-        ok: false,
-        retryable: true,
-        network: true,
-        message: "Không kết nối được Backend Proxy",
-      };
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-
-  let result = await attempt();
-  if (!result.ok && result.retryable) {
-    await new Promise((r) => setTimeout(r, 650));
-    result = await attempt();
-  }
-
-  const latencyMs = result.latencyMs || Date.now() - started;
-  if (result.ok) {
-    const parsed = self.TaxCapDirect.parseImageDataUrl(image);
-    const imageHash = parsed
-      ? self.TaxCapDirect.hashBase64Quick(`${parsed.mimeType}:${parsed.data}`)
-      : "";
-    if (result.sampleId) {
-      await appendSampleRecord({
-        sampleId: result.sampleId,
-        portal,
-        source: result.source || "proxy",
-        predicted: result.captcha,
-        latencyMs,
-        imageDataUrl: image,
-        imageHash,
-      });
-    }
-    await pushSolveLog({
-      portal,
-      status: "ok",
-      code: result.captcha,
-      latencyMs,
-      message: `Proxy đọc thành công (${result.source || "gemini"})`,
-    });
-  } else {
-    await pushSolveLog({
-      portal,
-      status: "error",
-      latencyMs,
-      message: result.message || "Lỗi Backend Proxy",
-    });
-  }
-
-  await bumpStats(result.ok);
-  await updateBadge(Boolean(result.network));
-  return result;
-}
-
-async function handleSolve(portal, image, bypassCache = false) {
-  const gate = await ensureLicenseUnlocked();
-  if (!gate.ok) {
-    return {
-      ok: false,
-      licenseLocked: true,
-      message: gate.message,
-    };
-  }
-  const settings = await getSettings();
-  const result =
-    settings.connectionMode === "proxy"
-      ? await callSolveProxy(portal, image, bypassCache, settings)
-      : await solveDirectGemini(portal, image, bypassCache, settings);
-  if (result?.ok) {
-    await recordLicensedSolve();
-  }
-  return result;
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -697,22 +526,14 @@ chrome.runtime.onInstalled.addListener(async () => {
   } else {
     const nextSettings = {
       ...self.TAXCAP_DEFAULTS,
-      ...saved,
+      enabled: saved.enabled !== false,
+      pausedUntil: Number(saved.pausedUntil) || 0,
+      licenseApiUrl: saved.licenseApiUrl || self.TAXCAP_DEFAULTS.licenseApiUrl || "",
       portals: {
         ...self.TAXCAP_DEFAULTS.portals,
         ...(saved.portals || {}),
       },
     };
-    if (self.TAXCAP_DEFAULTS.connectionMode === "proxy" && self.TAXCAP_DEFAULTS.apiBaseUrl) {
-      nextSettings.connectionMode = "proxy";
-      nextSettings.apiBaseUrl = self.TAXCAP_DEFAULTS.apiBaseUrl;
-      nextSettings.accessToken = self.TAXCAP_DEFAULTS.accessToken || saved.accessToken || "";
-    } else if (!saved.connectionMode) {
-      nextSettings.connectionMode = "direct";
-    }
-    if (self.TAXCAP_DEFAULTS.geminiApiKey && !saved.geminiApiKey) {
-      nextSettings.geminiApiKey = self.TAXCAP_DEFAULTS.geminiApiKey;
-    }
     await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
   }
   await updateBadge(false);
@@ -732,7 +553,9 @@ chrome.alarms?.onAlarm?.addListener((alarm) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type === "TAXCAP_GET_SETTINGS") {
+  if (!msg?.type) return;
+
+  if (msg.type === "TAXCAP_GET_SETTINGS") {
     (async () => {
       const [settings, licState] = await Promise.all([getSettings(), loadLicenseState()]);
       let evaluation = self.TaxCapLicense.evaluateLocalLicense(licState);
@@ -752,7 +575,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_LICENSE_STATUS" || msg?.type === "TAXCAP_GET_LICENSE") {
+  if (msg.type === "TAXCAP_LICENSE_STATUS" || msg.type === "TAXCAP_GET_LICENSE") {
     (async () => {
       try {
         const [deviceId, licState] = await Promise.all([ensureDeviceId(), loadLicenseState()]);
@@ -775,7 +598,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_LICENSE_ACTIVATE" || msg?.type === "TAXCAP_ACTIVATE_LICENSE") {
+  if (msg.type === "TAXCAP_LICENSE_ACTIVATE" || msg.type === "TAXCAP_ACTIVATE_LICENSE") {
     refreshLicenseIfNeeded({
       force: true,
       licenseKey: msg.licenseKey || "",
@@ -797,7 +620,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_LICENSE_REFRESH") {
+  if (msg.type === "TAXCAP_LICENSE_REFRESH") {
     refreshLicenseIfNeeded({ force: true })
       .then(async (res) => {
         const deviceId = await ensureDeviceId();
@@ -813,7 +636,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_LICENSE_DEACTIVATE") {
+  if (msg.type === "TAXCAP_LICENSE_DEACTIVATE") {
     (async () => {
       const [current, deviceId] = await Promise.all([loadLicenseState(), ensureDeviceId()]);
       if (current.licenseKey && current.licenseApiUrl) {
@@ -839,12 +662,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_SOLVE") {
-    handleSolve(msg.portal, msg.image, Boolean(msg.bypassCache)).then(sendResponse);
+  if (msg.type === "TAXCAP_SOLVE_ONNX") {
+    handleSolveOnnx(msg).then(sendResponse);
     return true;
   }
 
-  if (msg?.type === "TAXCAP_RECORD_LOCAL") {
+  if (msg.type === "TAXCAP_RECORD_LOCAL") {
     (async () => {
       const gate = await ensureLicenseUnlocked();
       if (!gate.ok) {
@@ -854,91 +677,55 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       await recordLicensedSolve();
       await bumpStats(true);
       await updateBadge(false);
-      const settings = await getSettings();
       const parsed = self.TaxCapDirect.parseImageDataUrl(msg.image || "");
-      const portal = msg.portal || "hddt";
+      const portal = self.TaxCapDirect.normalizePortalId(msg.portal || "hddt");
       const latencyMs = Math.max(1, Math.round(Number(msg.latencyMs) || 2));
       const confidence = Math.max(0, Math.min(100, Math.round(Number(msg.confidence) || 95)));
+      const source = String(msg.source || "svg-local");
+
+      const sourceLabel =
+        source === "svg-sig"
+          ? `SVG chữ ký nội bộ (${confidence}%)`
+          : source === "text-local"
+            ? "Đọc văn bản trực tiếp (DOM)"
+            : source === "svg-text"
+              ? "Đọc chữ SVG trực tiếp"
+              : `SVG nội bộ (${confidence}%)`;
 
       await pushSolveLog({
         portal,
         status: "ok",
         code: msg.captcha || "",
         latencyMs,
-        message: `SVG nội bộ (${confidence}%)`,
+        message: sourceLabel,
       });
 
-      if (settings.connectionMode === "direct") {
-        const imageHash = parsed
-          ? self.TaxCapDirect.hashBase64Quick(`${parsed.mimeType}:${parsed.data}`)
-          : "";
-        const sampleId = `local:${crypto.randomUUID()}`;
-        if (parsed) {
-          await savePendingSolve(sampleId, {
-            portal,
-            predicted: msg.captcha || "",
-            imageHash,
-            mimeType: parsed.mimeType,
-            base64Data: parsed.data,
-          });
-        }
-        await appendSampleRecord({
-          sampleId,
+      const imageHash = parsed
+        ? self.TaxCapDirect.hashBase64Quick(`${parsed.mimeType}:${parsed.data}`)
+        : "";
+      const sampleId = `local:${crypto.randomUUID()}`;
+      if (parsed) {
+        await savePendingSolve(sampleId, {
           portal,
-          source: "svg-local",
           predicted: msg.captcha || "",
-          latencyMs,
-          imageDataUrl: msg.image || "",
           imageHash,
         });
-        sendResponse({ ok: true, sampleId, localOnly: true });
-        return;
       }
-
-      const baseUrl = String(settings.apiBaseUrl || "").replace(/\/+$/, "");
-      if (!baseUrl || isAisDevPreviewUrl(baseUrl) || !msg.image) {
-        sendResponse({ ok: true, localOnly: true });
-        return;
-      }
-      const headers = { "Content-Type": "application/json" };
-      if (settings.accessToken) {
-        headers["X-Extension-Token"] = settings.accessToken;
-      }
-      try {
-        const res = await fetch(`${baseUrl}/api/dataset/record-local`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            portal,
-            captcha: msg.captcha,
-            confidence,
-            latencyMs,
-            image: msg.image,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data.sampleId) {
-          await appendSampleRecord({
-            sampleId: data.sampleId,
-            portal,
-            source: "svg-local",
-            predicted: msg.captcha || "",
-            latencyMs,
-            imageDataUrl: msg.image || "",
-            imageHash: parsed
-              ? self.TaxCapDirect.hashBase64Quick(`${parsed.mimeType}:${parsed.data}`)
-              : "",
-          });
-        }
-        sendResponse({ ok: res.ok, sampleId: data.sampleId || "" });
-      } catch {
-        sendResponse({ ok: true, localOnly: true });
-      }
+      await appendSampleRecord({
+        sampleId,
+        portal,
+        source,
+        predicted: msg.captcha || "",
+        latencyMs,
+        imageDataUrl: msg.image || "",
+        imageHash,
+      });
+      sendResponse({ ok: true, sampleId, localOnly: true });
     })();
     return true;
   }
 
-  if (msg?.type === "TAXCAP_FEEDBACK") {
+  if (msg.type === "TAXCAP_FEEDBACK") {
     (async () => {
       const sampleId = String(msg.sampleId || "");
       const outcome = msg.outcome;
@@ -947,7 +734,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
 
-      // Cập nhật nhãn trong Kho Dữ liệu cục bộ
       const prevSamples = await loadSamples();
       const { samples: nextSamples, updatedSample } = self.TaxCapDirect.applySampleFeedback(prevSamples, {
         sampleId,
@@ -958,67 +744,36 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         await saveSamples(nextSamples);
       }
 
-      if (sampleId.startsWith("local:")) {
-        const pending = await takePendingSolve(sampleId);
-        const parsed = updatedSample?.imageDataUrl
-          ? self.TaxCapDirect.parseImageDataUrl(updatedSample.imageDataUrl)
-          : null;
-        const sourceMeta = pending || (updatedSample ? {
-          portal: updatedSample.portal,
-          predicted: updatedSample.predicted,
-          imageHash: updatedSample.imageHash,
-          mimeType: parsed?.mimeType || "",
-          base64Data: parsed?.data || "",
-        } : null);
+      const pending = await takePendingSolve(sampleId);
+      const sourceMeta =
+        pending ||
+        (updatedSample
+          ? {
+              portal: updatedSample.portal,
+              predicted: updatedSample.predicted,
+              imageHash: updatedSample.imageHash,
+            }
+          : null);
 
-        if (!sourceMeta) {
-          sendResponse({ ok: false });
-          return;
-        }
-        const prevMem = await loadLocalMemory();
-        const nextMem = self.TaxCapDirect.updateLocalLearningState(prevMem, {
-          portal: sourceMeta.portal,
-          predicted: sourceMeta.predicted,
-          finalLabel: msg.finalLabel || "",
-          outcome,
-          imageHash: sourceMeta.imageHash,
-          mimeType: sourceMeta.mimeType,
-          base64Data: sourceMeta.base64Data,
-        });
-        await saveLocalMemory(nextMem);
-        sendResponse({ ok: true, localLearned: true });
-        return;
-      }
-
-      const settings = await getSettings();
-      const baseUrl = String(settings.apiBaseUrl || "").replace(/\/+$/, "");
-      if (!baseUrl) {
+      if (!sourceMeta) {
         sendResponse({ ok: Boolean(updatedSample) });
         return;
       }
-      const headers = { "Content-Type": "application/json" };
-      if (settings.accessToken) {
-        headers["X-Extension-Token"] = settings.accessToken;
-      }
-      try {
-        const res = await fetch(`${baseUrl}/api/dataset/feedback`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            sampleId,
-            outcome,
-            finalLabel: msg.finalLabel || "",
-          }),
-        });
-        sendResponse({ ok: res.ok });
-      } catch {
-        sendResponse({ ok: false });
-      }
+      const prevMem = await loadLocalMemory();
+      const nextMem = self.TaxCapDirect.updateLocalLearningState(prevMem, {
+        portal: sourceMeta.portal,
+        predicted: sourceMeta.predicted,
+        finalLabel: msg.finalLabel || "",
+        outcome,
+        imageHash: sourceMeta.imageHash,
+      });
+      await saveLocalMemory(nextMem);
+      sendResponse({ ok: true, localLearned: true });
     })();
     return true;
   }
 
-  if (msg?.type === "TAXCAP_GET_DATASET") {
+  if (msg.type === "TAXCAP_GET_DATASET") {
     Promise.all([loadSamples(), loadLocalMemory()])
       .then(([samples, mem]) => {
         const summary = self.TaxCapDirect.computeDatasetSummary(samples);
@@ -1038,7 +793,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_POPUP_UPDATE_SAMPLE") {
+  if (msg.type === "TAXCAP_POPUP_UPDATE_SAMPLE") {
     (async () => {
       const sampleId = String(msg.sampleId || "");
       const cleaned = self.TaxCapDirect.sanitizeCaptchaText(String(msg.finalLabel || ""));
@@ -1060,9 +815,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       });
       await saveSamples(nextSamples);
 
-      const parsed = updatedSample?.imageDataUrl
-        ? self.TaxCapDirect.parseImageDataUrl(updatedSample.imageDataUrl)
-        : null;
       const prevMem = await loadLocalMemory();
       const nextMem = self.TaxCapDirect.updateLocalLearningState(prevMem, {
         portal: target.portal,
@@ -1070,8 +822,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         finalLabel: cleaned,
         outcome,
         imageHash: target.imageHash,
-        mimeType: parsed?.mimeType || "",
-        base64Data: parsed?.data || "",
       });
       await saveLocalMemory(nextMem);
       sendResponse({ ok: true, sample: updatedSample });
@@ -1079,17 +829,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_CLEAR_DATASET") {
-    Promise.all([
-      saveSamples([]),
-      saveLocalMemory(self.TaxCapDirect.createEmptyMemoryState()),
-    ])
+  if (msg.type === "TAXCAP_CLEAR_DATASET") {
+    Promise.all([saveSamples([]), saveLocalMemory(self.TaxCapDirect.createEmptyMemoryState())])
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
   }
 
-  if (msg?.type === "TAXCAP_GET_LOGS") {
+  if (msg.type === "TAXCAP_GET_LOGS") {
     loadLogs()
       .then((logs) => {
         const stats = self.TaxCapDirect.computeLogStats(logs);
@@ -1099,7 +846,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_CLEAR_LOGS") {
+  if (msg.type === "TAXCAP_CLEAR_LOGS") {
     chrome.storage.local
       .set({ [LOGS_KEY]: [] })
       .then(() => sendResponse({ ok: true }))
@@ -1107,100 +854,53 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_GET_MEMORY_STATS") {
+  if (msg.type === "TAXCAP_GET_MEMORY_STATS") {
     loadLocalMemory()
       .then((mem) => sendResponse({ ok: true, ...summarizeMemory(mem) }))
       .catch(() => sendResponse({ ok: true, exactCount: 0, learnedCount: 0, correctedCount: 0 }));
     return true;
   }
 
-  if (msg?.type === "TAXCAP_CLEAR_MEMORY") {
+  if (msg.type === "TAXCAP_CLEAR_MEMORY") {
     saveLocalMemory(self.TaxCapDirect.createEmptyMemoryState())
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
   }
 
-  if (msg?.type === "TAXCAP_PING") {
-    getSettings().then(async (settings) => {
-      if (settings.connectionMode !== "proxy") {
-        const apiKey = normalizeApiKey(settings.geminiApiKey);
-        if (!apiKey) {
-          await updateBadge(true);
+  if (msg.type === "TAXCAP_PING") {
+    (async () => {
+      try {
+        await ensureOffscreenDocument();
+        const res = await sendToOffscreen({ loai: "offscreen_ping" });
+        await updateBadge(!res?.ok);
+        if (res?.ok) {
+          sendResponse({
+            ok: true,
+            mode: "local-onnx",
+            model: "ddddocr_old.onnx",
+            charsetCount: res.soKyTu || 0,
+          });
+        } else {
           sendResponse({
             ok: false,
-            message: "Chưa nhập Gemini API Key (lấy miễn phí tại aistudio.google.com/apikey)",
+            mode: "local-onnx",
+            message: res?.loi || "Không nạp được mô hình ONNX cục bộ.",
           });
-          return;
         }
-        const model = self.TaxCapDirect.resolveDirectModel(settings.speedMode);
-        try {
-          const res = await fetch(`${GEMINI_API_BASE}/${encodeURIComponent(model)}`, {
-            method: "GET",
-            headers: { "x-goog-api-key": apiKey },
-          });
-          if (res.ok) {
-            await updateBadge(false);
-            sendResponse({ ok: true, mode: "direct", model });
-            return;
-          }
-          const data = await res.json().catch(() => ({}));
-          await updateBadge(true);
-          sendResponse({
-            ok: false,
-            message:
-              res.status === 400 || res.status === 401 || res.status === 403
-                ? "Gemini API Key không hợp lệ — hãy kiểm tra lại key AIza..."
-                : data?.error?.message || `Lỗi Gemini API (${res.status})`,
-          });
-        } catch {
-          await updateBadge(true);
-          sendResponse({ ok: false, message: "Không kết nối được tới Google Gemini API" });
-        }
-        return;
-      }
-
-      const baseUrl = String(settings.apiBaseUrl || "").replace(/\/+$/, "");
-      if (!baseUrl) {
-        await updateBadge(true);
-        sendResponse({ ok: false, message: "Chưa nhập URL Backend Proxy" });
-        return;
-      }
-      if (isAisDevPreviewUrl(baseUrl)) {
+      } catch (err) {
         await updateBadge(true);
         sendResponse({
           ok: false,
-          message: "URL ais-dev-... bị AI Studio chặn cookie. Hãy chuyển sang chế độ Độc lập (API Key).",
+          mode: "local-onnx",
+          message: err?.message || "Không mở được Offscreen Document ONNX.",
         });
-        return;
       }
-      const headers = {};
-      if (settings.accessToken) {
-        headers["X-Extension-Token"] = settings.accessToken;
-      }
-      try {
-        const res = await fetch(`${baseUrl}/api/health`, { headers });
-        const ct = res.headers.get("content-type") || "";
-        if (res.redirected || !ct.includes("application/json")) {
-          await updateBadge(true);
-          sendResponse({
-            ok: false,
-            message: "Máy chủ trả về HTML/đăng nhập thay vì API JSON.",
-          });
-          return;
-        }
-        const data = await res.json().catch(() => ({}));
-        await updateBadge(!res.ok);
-        sendResponse({ ok: res.ok, mode: "proxy", ...data });
-      } catch {
-        await updateBadge(true);
-        sendResponse({ ok: false, message: "Không kết nối được máy chủ Proxy" });
-      }
-    });
+    })();
     return true;
   }
 
-  if (msg?.type === "TAXCAP_CHECK_LICENSE") {
+  if (msg.type === "TAXCAP_CHECK_LICENSE") {
     ensureLicenseUnlocked()
       .then((res) => {
         sendResponse({
@@ -1221,7 +921,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
-  if (msg?.type === "TAXCAP_DOWNLOAD_FILE" || msg?.type === "download") {
+  if (msg.type === "TAXCAP_DOWNLOAD_FILE" || msg.type === "download") {
     (async () => {
       const licCheck = await ensureLicenseUnlocked();
       if (!licCheck.ok) {

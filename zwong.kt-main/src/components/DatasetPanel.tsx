@@ -2,11 +2,12 @@ import React, { useState } from 'react';
 import { Download, RotateCw, Trash2, Check, Database, Sparkles, Brain, Cpu } from 'lucide-react';
 import { PORTAL_LIST, PORTALS, type PortalId } from '../utils/captchaLogic';
 import { PORTAL_PROFILES, type PortalLearnedHints } from '../utils/portalRules';
+import { getPortalDisplayName } from '../utils/allPortals';
 
 export interface DatasetSampleItem {
   sampleId: string;
   timestamp: string;
-  portal: PortalId;
+  portal: string;
   model: string;
   speedMode: string;
   latencyMs: number;
@@ -96,6 +97,7 @@ interface DatasetPanelProps {
 }
 
 const TARGET_PER_PORTAL = 500;
+const MAIN_PORTAL_SET = new Set(['hddt', 'tdt', 'dvc', 'tracuunnt']);
 
 function formatReasonLabel(reason: MemorySummaryData['lastReason']): string {
   if (reason === 'auto-samples') return 'Tự động (đủ mẫu mới)';
@@ -117,16 +119,19 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
   onClear,
   onLabelUpdated,
   onConsolidateMemory,
-  onChangeFewShotMode,
   onGoToSandbox,
 }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftLabel, setDraftLabel] = useState<string>('');
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [portalFilter, setPortalFilter] = useState<'all' | PortalId>('all');
+  const [portalFilter, setPortalFilter] = useState<'all' | 'extended' | PortalId>('all');
 
   const filtered =
-    portalFilter === 'all' ? samples : samples.filter((s) => s.portal === portalFilter);
+    portalFilter === 'all'
+      ? samples
+      : portalFilter === 'extended'
+        ? samples.filter((s) => !MAIN_PORTAL_SET.has(s.portal))
+        : samples.filter((s) => s.portal === portalFilter);
 
   const handleSaveLabel = async (sample: DatasetSampleItem) => {
     const cleaned = draftLabel.trim().replace(/[^A-Za-z0-9]/g, '');
@@ -197,7 +202,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
             </h2>
             <p className="mt-0.5 text-xs text-slate-600">
               Mỗi lần bạn xác nhận hoặc sửa tay mã captcha trên cổng Thuế / Sandbox, ảnh và nhãn chuẩn được tự động lưu vào{' '}
-              <code className="font-mono text-slate-800">dataset/</code> để dùng huấn luyện model riêng ở Bước 3.
+              <code className="font-mono text-slate-800">dataset/</code> để tinh chỉnh model ONNX riêng ở Bước 3.
             </p>
           </div>
           <a
@@ -245,11 +250,11 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-sky-700" />
           <h2 className="text-sm font-semibold text-slate-900">
-            Bước 2: Quy tắc từng cổng &amp; Kinh nghiệm sửa lỗi tự động nạp vào AI
+            Bước 2: Quy tắc hậu xử lý từng cổng &amp; Thống kê lỗi hay gặp
           </h2>
         </div>
         <p className="text-xs text-slate-600">
-          Ngoài bộ lọc làm nét/lọc nhiễu ảnh, mỗi khi bạn sửa tay các cặp chữ hay nhầm (như <code className="font-mono">o → 0</code>, <code className="font-mono">l → 1</code>), hệ thống tự cập nhật gợi ý cảnh báo vào prompt cho lần đọc tiếp theo.
+          Bộ giải cục bộ áp dụng hậu xử lý chuẩn hóa riêng cho từng cổng (chữ hoa/thường, số lượng ký tự, chuyển chữ dễ nhầm như <code className="font-mono">o → 0</code>, <code className="font-mono">l → 1</code>) và thống kê các cặp ký tự bạn hay sửa tay.
         </p>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -262,7 +267,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
                   <span className="font-semibold text-slate-900">{p.shortName}</span>
                   <span className="font-mono text-[11px] text-slate-500">
                     {hints && hints.usableCount > 0
-                      ? `Đã học ${hints.usableCount} mẫu`
+                      ? `Đã lưu ${hints.usableCount} mẫu`
                       : 'Đang dùng quy tắc gốc'}
                   </span>
                 </div>
@@ -290,14 +295,14 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
         </div>
       </div>
 
-      {/* Step 3: Self-Updating Memory & Local ONNX Model */}
+      {/* Step 3: Self-Updating Local Memory & Embedded ONNX Model */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
         <div className="flex flex-wrap sm:flex-nowrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Brain className="h-4 w-4 text-sky-700" />
               <h2 className="text-sm font-semibold text-slate-900">
-                Bước 3: Trí nhớ AI tự cập nhật định kỳ &amp; Model cục bộ
+                Bước 3: Trí nhớ cục bộ tự cập nhật định kỳ &amp; Model ONNX
               </h2>
             </div>
             <p className="mt-1 text-xs text-slate-600">
@@ -309,7 +314,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
               <span className="font-semibold text-slate-800">
                 {memorySummary?.autoScheduleMinutes ?? 15} phút
               </span>
-              : nhớ tức thì (&lt;5ms) ảnh đã xác nhận đúng và chọn ảnh mẫu khó dạy kèm Gemini.
+              : nhớ tức thì (&lt;5ms) ảnh đã xác nhận đúng và đồng bộ bộ mẫu kiểm chứng cho mô hình ONNX cục bộ.
             </p>
           </div>
 
@@ -351,21 +356,14 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-1.5">
-            <label htmlFor="few-shot-mode-select" className="block text-[11px] text-slate-500">
-              Dạy kèm ảnh mẫu (Few-Shot)
-            </label>
-            <select
-              id="few-shot-mode-select"
-              data-testid="few-shot-mode-select"
-              value={memorySummary?.fewShotMode ?? 'smart'}
-              onChange={(e) => onChangeFewShotMode?.(e.target.value as FewShotMode)}
-              className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-800 focus:border-sky-600 focus:outline-none"
-            >
-              <option value="smart">Thông minh (khi thử lại / Chuẩn)</option>
-              <option value="always">Luôn kèm ảnh mẫu khó</option>
-              <option value="off">Tắt (chỉ gửi text quy tắc)</option>
-            </select>
+          <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-1">
+            <div className="text-[11px] text-slate-500">Bộ giải tích hợp sẵn</div>
+            <div className="font-mono text-sm font-semibold text-sky-700">
+              ddddocr_old.onnx
+            </div>
+            <div className="text-[11px] text-slate-500">
+              Chạy WebAssembly cục bộ 100%, không cần API Key
+            </div>
           </div>
         </div>
 
@@ -373,7 +371,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
         {memorySummary && memorySummary.portals.some((p) => p.exemplars.length > 0) && (
           <div className="space-y-2">
             <div className="text-xs font-medium text-slate-700">
-              Ảnh mẫu tiêu biểu đang lưu trong trí nhớ dạy kèm AI:
+              Ảnh mẫu tiêu biểu đang lưu trong trí nhớ cục bộ:
             </div>
             <div className="flex flex-wrap gap-3">
               {memorySummary.portals.flatMap((p) =>
@@ -408,11 +406,11 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
               <Cpu className="h-3.5 w-3.5 text-slate-600" />
-              <span>Model OCR cục bộ (ONNX &lt;150ms — tự fallback Gemini)</span>
+              <span>Model OCR cục bộ (ONNX WASM tích hợp sẵn: ddddocr_old.onnx)</span>
             </div>
             <span className="text-[11px] text-slate-500">
-              Runtime ONNX:{' '}
-              {localModels?.runtimeAvailable ? 'Đã sẵn sàng' : 'Chưa cài onnxruntime-node (đang dùng Gemini)'}
+              Runtime Node ONNX:{' '}
+              {localModels?.runtimeAvailable ? 'Đã sẵn sàng' : 'Chạy ONNX trực tiếp trên trình duyệt (WASM)'}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -423,21 +421,20 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
                   <div className="font-semibold text-slate-800">{p.shortName}</div>
                   <div className="mt-0.5 text-slate-500">
                     {m?.active
-                      ? `Đang chạy (${m.valAccuracyPercent ?? '—'}%)`
-                      : m?.hasOnnxFile
-                        ? 'Có .onnx (thiếu runtime)'
-                        : 'Chưa train (.onnx)'}
+                      ? `Model riêng (${m.valAccuracyPercent ?? '—'}%)`
+                      : p.id === 'hddt'
+                        ? 'SVG 3 tầng → ddddocr ONNX'
+                        : 'ddddocr_old.onnx (WASM)'}
                   </div>
                 </div>
               );
             })}
           </div>
           <div className="text-[11px] text-slate-500">
-            Khi gom đủ ~300–500 mẫu/cổng, chạy trên máy:{' '}
+            Khi gom đủ ~300–500 mẫu/cổng, có thể huấn luyện thêm model riêng:{' '}
             <code className="rounded bg-slate-200/70 px-1.5 py-0.5 font-mono text-slate-800">
               python scripts/train_ocr.py --portal hddt
-            </code>{' '}
-            — Proxy tự nạp file <code className="font-mono">models/*.onnx</code> mới.
+            </code>
           </div>
         </div>
       </div>
@@ -449,7 +446,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
             <select
               aria-label="Lọc mẫu theo cổng"
               value={portalFilter}
-              onChange={(e) => setPortalFilter(e.target.value as 'all' | PortalId)}
+              onChange={(e) => setPortalFilter(e.target.value as 'all' | 'extended' | PortalId)}
               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:border-sky-600 focus:outline-none"
             >
               <option value="all">Tất cả cổng</option>
@@ -457,6 +454,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
               <option value="tdt">Thuế ĐT</option>
               <option value="dvc">DVC Thuế</option>
               <option value="tracuunnt">Tra cứu NNT</option>
+              <option value="extended">42 cổng mở rộng</option>
             </select>
             <span className="text-xs text-slate-500">
               Hiển thị {filtered.length} mẫu gần nhất
@@ -489,7 +487,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
             <Database className="h-7 w-7 text-slate-300 mx-auto" />
             <p className="text-sm font-medium text-slate-800">Chưa có mẫu ảnh nào trong kho dữ liệu</p>
             <p className="text-xs text-slate-500">
-              Mỗi lần giải captcha bằng API (trên cổng Thuế hoặc trong Mô phỏng &amp; Kiểm thử), mẫu sẽ tự động lưu tại đây để bạn xác nhận hoặc sửa nhãn.
+              Mỗi lần giải captcha cục bộ (trong Mô phỏng &amp; Kiểm thử), mẫu sẽ tự động lưu tại đây để bạn xác nhận hoặc sửa nhãn.
             </p>
             <button
               type="button"
@@ -506,7 +504,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
                 <tr>
                   <th className="px-5 py-2.5 font-medium">Ảnh Captcha</th>
                   <th className="px-4 py-2.5 font-medium">Cổng</th>
-                  <th className="px-4 py-2.5 font-medium">AI đoán</th>
+                  <th className="px-4 py-2.5 font-medium">Bộ giải đoán</th>
                   <th className="px-4 py-2.5 font-medium">Nhãn chuẩn (sửa nếu sai)</th>
                   <th className="px-4 py-2.5 font-medium">Trạng thái</th>
                   <th className="px-5 py-2.5 font-medium text-right">Độ trễ</th>
@@ -525,7 +523,7 @@ export const DatasetPanel: React.FC<DatasetPanelProps> = ({
                         />
                       </td>
                       <td className="px-4 py-2.5 font-medium text-slate-800 whitespace-nowrap">
-                        {PORTALS[item.portal]?.shortName || item.portal}
+                        {getPortalDisplayName(item.portal)}
                       </td>
                       <td className="px-4 py-2.5 font-mono text-slate-700 whitespace-nowrap">
                         {item.predicted}

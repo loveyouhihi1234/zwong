@@ -1,5 +1,6 @@
 const SETTINGS_KEY = "taxcapSettings";
 const STATS_KEY = "taxcapStats";
+const MAIN_PORTAL_IDS = new Set(["hddt", "tdt", "dvc", "tracuunnt"]);
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const panels = {
@@ -37,27 +38,21 @@ const licRefreshBtn = document.getElementById("licRefreshBtn");
 const licDeactivateBtn = document.getElementById("licDeactivateBtn");
 const licActionStatus = document.getElementById("licActionStatus");
 
-const connBanner = document.getElementById("connBanner");
-const connBannerText = document.getElementById("connBannerText");
-const goConfigBtn = document.getElementById("goConfigBtn");
-const activeModeChip = document.getElementById("activeModeChip");
 const statSolved = document.getElementById("statSolved");
 const statFailed = document.getElementById("statFailed");
 const pause15Btn = document.getElementById("pause15Btn");
 const resumeBtn = document.getElementById("resumeBtn");
 const pauseStatus = document.getElementById("pauseStatus");
-const speedModeSelect = document.getElementById("speedModeSelect");
-const enhanceToggle = document.getElementById("enhanceToggle");
 const portalBoxes = Array.from(document.querySelectorAll("[data-portal]"));
 
-const connectionModeSelect = document.getElementById("connectionModeSelect");
-const directFields = document.getElementById("directFields");
-const proxyFields = document.getElementById("proxyFields");
-const geminiKeyInput = document.getElementById("geminiKeyInput");
-const toggleKeyBtn = document.getElementById("toggleKeyBtn");
-const apiBaseInput = document.getElementById("apiBaseInput");
-const tokenInput = document.getElementById("tokenInput");
-const saveBtn = document.getElementById("saveBtn");
+const extGroupTitle = document.getElementById("extGroupTitle");
+const extGovLabel = document.getElementById("extGovLabel");
+const extBankLabel = document.getElementById("extBankLabel");
+const extInvoiceLabel = document.getElementById("extInvoiceLabel");
+const extDomainsSummary = document.getElementById("extDomainsSummary");
+const extDomainList = document.getElementById("extDomainList");
+const configPortalCount = document.getElementById("configPortalCount");
+
 const pingBtn = document.getElementById("pingBtn");
 const pingStatus = document.getElementById("pingStatus");
 const memoryStatsText = document.getElementById("memoryStatsText");
@@ -97,7 +92,57 @@ const PORTAL_NAMES = {
   tdt: "Thuế ĐT",
   dvc: "DVC Thuế",
   tracuunnt: "Tra cứu NNT",
+  extended: "Cổng mở rộng",
 };
+
+if (Array.isArray(window.CONG_THUE)) {
+  for (const c of window.CONG_THUE) {
+    if (!c.portalId && c.cong && !PORTAL_NAMES[c.cong]) {
+      PORTAL_NAMES[c.cong] = c.ten || c.hostname;
+    }
+  }
+}
+
+function renderExtendedPortalsCatalog() {
+  const all = Array.isArray(window.CONG_THUE) ? window.CONG_THUE : [];
+  const ext = all.filter((c) => !c.portalId);
+  const byGroup = { ext_gov: [], ext_bank: [], ext_invoice: [] };
+
+  for (const item of ext) {
+    const k = typeof window.nhomBatTat === "function" ? window.nhomBatTat(item) : "ext_invoice";
+    if (byGroup[k]) byGroup[k].push(item);
+  }
+
+  if (extGroupTitle) extGroupTitle.textContent = `Cổng mở rộng (${ext.length} cổng)`;
+  if (extGovLabel) extGovLabel.textContent = `Thuế · BHXH · Hải quan · DVCQG (${byGroup.ext_gov.length})`;
+  if (extBankLabel) extBankLabel.textContent = `Hóa đơn Ngân hàng (${byGroup.ext_bank.length})`;
+  if (extInvoiceLabel) extInvoiceLabel.textContent = `Tra cứu Hóa đơn NCC (${byGroup.ext_invoice.length})`;
+  if (extDomainsSummary) extDomainsSummary.textContent = `Xem danh sách ${ext.length} tên miền mở rộng`;
+  if (configPortalCount) configPortalCount.textContent = `${all.length} cổng`;
+
+  if (extDomainList) {
+    extDomainList.innerHTML = "";
+    const tagNames = {
+      ext_gov: "Cơ quan NN",
+      ext_bank: "Ngân hàng",
+      ext_invoice: "Hóa đơn NCC",
+    };
+    for (const item of ext) {
+      const k = typeof window.nhomBatTat === "function" ? window.nhomBatTat(item) : "ext_invoice";
+      const row = document.createElement("div");
+      row.className = "domain-row";
+      const host = document.createElement("span");
+      host.className = "domain-host";
+      host.title = `${item.ten} (${item.hostname})`;
+      host.textContent = item.hostname;
+      const tag = document.createElement("span");
+      tag.className = "domain-tag";
+      tag.textContent = tagNames[k] || "Mở rộng";
+      row.append(host, tag);
+      extDomainList.appendChild(row);
+    }
+  }
+}
 
 function switchTab(nextTab) {
   if (!licenseUnlocked) return;
@@ -119,32 +164,6 @@ function switchTab(nextTab) {
 for (const btn of tabButtons) {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 }
-goConfigBtn.addEventListener("click", () => switchTab("config"));
-
-function syncModeVisibility(mode) {
-  const isProxy = mode === "proxy";
-  directFields.classList.toggle("hidden", isProxy);
-  proxyFields.classList.toggle("hidden", !isProxy);
-}
-
-function renderConnectionSummary(settings) {
-  const isProxy = settings.connectionMode === "proxy";
-  const hasKey = Boolean(settings.geminiApiKey);
-  const hasProxy = Boolean(settings.apiBaseUrl);
-
-  if (!isProxy && !hasKey) {
-    connBanner.className = "alert-warn";
-    connBannerText.textContent = "Chưa nhập Gemini API Key (HĐĐT SVG vẫn chạy <5ms)";
-    activeModeChip.textContent = "Chưa gắn API Key";
-  } else if (isProxy && !hasProxy) {
-    connBanner.className = "alert-warn";
-    connBannerText.textContent = "Chưa nhập URL Backend Proxy";
-    activeModeChip.textContent = "Proxy (chưa có URL)";
-  } else {
-    connBanner.className = "hidden";
-    activeModeChip.textContent = isProxy ? "Qua Proxy" : "Độc lập (Gemini Key)";
-  }
-}
 
 async function readSettingsDirect() {
   try {
@@ -156,10 +175,7 @@ async function readSettingsDirect() {
     const res = await chrome.storage.local.get(SETTINGS_KEY);
     const saved = res[SETTINGS_KEY] || {};
     const defaults = self.TAXCAP_DEFAULTS || {
-      connectionMode: "direct",
-      geminiApiKey: "",
-      apiBaseUrl: "",
-      accessToken: "",
+      solverMode: "local-onnx",
       enabled: true,
       pausedUntil: 0,
       portals: {},
@@ -277,20 +293,10 @@ async function loadLicenseStatus() {
 }
 
 async function loadState() {
+  renderExtendedPortalsCatalog();
   await readSettingsDirect();
   enabledToggle.checked = Boolean(currentSettings.enabled);
   enabledLabel.textContent = currentSettings.enabled ? "Đang bật" : "Đang tắt";
-
-  const mode = currentSettings.connectionMode === "proxy" ? "proxy" : "direct";
-  connectionModeSelect.value = mode;
-  syncModeVisibility(mode);
-  renderConnectionSummary(currentSettings);
-
-  speedModeSelect.value = currentSettings.speedMode === "accurate" ? "accurate" : "fast";
-  if (enhanceToggle) enhanceToggle.checked = currentSettings.enhanceImage !== false;
-  geminiKeyInput.value = currentSettings.geminiApiKey || "";
-  apiBaseInput.value = currentSettings.apiBaseUrl || "";
-  tokenInput.value = currentSettings.accessToken || "";
 
   for (const box of portalBoxes) {
     const id = box.getAttribute("data-portal");
@@ -330,15 +336,6 @@ async function saveSettings(patch) {
   await loadState();
 }
 
-function collectConfigFields() {
-  return {
-    connectionMode: connectionModeSelect.value === "proxy" ? "proxy" : "direct",
-    geminiApiKey: geminiKeyInput.value.trim().replace(/^["']+|["']+$/g, ""),
-    apiBaseUrl: apiBaseInput.value.trim().replace(/\/+$/, ""),
-    accessToken: tokenInput.value.trim(),
-  };
-}
-
 enabledToggle.addEventListener("change", () => {
   saveSettings({ enabled: enabledToggle.checked, pausedUntil: 0 });
 });
@@ -358,28 +355,6 @@ resumeBtn.addEventListener("click", () => {
   saveSettings({ enabled: true, pausedUntil: 0 });
 });
 
-speedModeSelect.addEventListener("change", () => {
-  saveSettings({ speedMode: speedModeSelect.value === "accurate" ? "accurate" : "fast" });
-});
-
-if (enhanceToggle) {
-  enhanceToggle.addEventListener("change", () => {
-    saveSettings({ enhanceImage: enhanceToggle.checked });
-  });
-}
-
-connectionModeSelect.addEventListener("change", () => {
-  const mode = connectionModeSelect.value === "proxy" ? "proxy" : "direct";
-  syncModeVisibility(mode);
-  saveSettings({ connectionMode: mode });
-});
-
-toggleKeyBtn.addEventListener("click", () => {
-  const isPwd = geminiKeyInput.type === "password";
-  geminiKeyInput.type = isPwd ? "text" : "password";
-  toggleKeyBtn.textContent = isPwd ? "Ẩn" : "Hiện";
-});
-
 clearMemoryBtn.addEventListener("click", async () => {
   try {
     await chrome.runtime.sendMessage({ type: "TAXCAP_CLEAR_MEMORY" });
@@ -391,45 +366,41 @@ clearMemoryBtn.addEventListener("click", async () => {
   }
 });
 
-saveBtn.addEventListener("click", async () => {
-  await saveSettings(collectConfigFields());
-  pingStatus.className = "status ok";
-  pingStatus.textContent = "Đã lưu cấu hình.";
-});
-
 pingBtn.addEventListener("click", async () => {
+  pingBtn.disabled = true;
   pingStatus.className = "status";
-  pingStatus.textContent = "Đang kiểm tra kết nối...";
-  const fields = collectConfigFields();
-  await saveSettings(fields);
+  pingStatus.textContent = "Đang nạp mô hình ddddocr_old.onnx (WASM)...";
 
   let res = null;
   try {
     res = await chrome.runtime.sendMessage({ type: "TAXCAP_PING" });
   } catch {
     res = null;
+  } finally {
+    pingBtn.disabled = false;
   }
 
   if (!res) {
     res = { ok: false, message: "Không liên hệ được Service Worker." };
   }
 
-  if (res?.ok && res?.tokenValid === false) {
-    pingStatus.className = "status err";
-    pingStatus.textContent = "Kết nối được Proxy nhưng sai Mã truy cập nhóm.";
-  } else if (res?.ok && res?.mode === "direct") {
+  if (res.ok) {
     pingStatus.className = "status ok";
-    pingStatus.textContent = `Kết nối Gemini trực tiếp tốt (${res.model || "Flash Lite"}).`;
-  } else if (res?.ok) {
-    pingStatus.className = "status ok";
-    pingStatus.textContent = `Kết nối Proxy tốt (${res.model || "Gemini Flash"}).`;
+    const chars = res.charsetCount ? ` · ${res.charsetCount} ký tự` : "";
+    pingStatus.textContent = `Sẵn sàng: ${res.model || "ddddocr_old.onnx"} (WASM cục bộ${chars}).`;
   } else {
     pingStatus.className = "status err";
-    pingStatus.textContent = res?.message || "Kiểm tra kết nối thất bại.";
+    pingStatus.textContent = res.message || "Không nạp được mô hình ONNX cục bộ.";
   }
 });
 
 // --- TAB 3: KHO DỮ LIỆU ---
+function matchesPortalFilter(portal, filter) {
+  if (filter === "all") return true;
+  if (filter === "extended") return !MAIN_PORTAL_IDS.has(portal);
+  return portal === filter;
+}
+
 function renderPortalCards(byPortal, portalHints) {
   dsPortalsGrid.innerHTML = "";
   for (const item of byPortal || []) {
@@ -480,13 +451,13 @@ function renderPortalCards(byPortal, portalHints) {
 
 function renderSampleList() {
   const filter = dsPortalFilter.value;
-  const items = filter === "all" ? cachedSamples : cachedSamples.filter((s) => s.portal === filter);
+  const items = cachedSamples.filter((s) => matchesPortalFilter(s.portal, filter));
   dsSampleList.innerHTML = "";
 
   if (!items.length) {
     const empty = document.createElement("div");
     empty.className = "empty-box";
-    empty.textContent = "Chưa có mẫu captcha nào. Mở cổng Thuế để Extension tự ghi nhận ảnh tại đây.";
+    empty.textContent = "Chưa có mẫu captcha nào. Mở cổng Thuế/Hóa đơn để Extension tự ghi nhận mẫu tại đây.";
     dsSampleList.appendChild(empty);
     return;
   }
@@ -537,8 +508,8 @@ function renderSampleList() {
     subLine.className = "sample-sub";
     const timeStr = sample.timestamp ? new Date(sample.timestamp).toLocaleTimeString("vi-VN") : "";
     const predNote =
-      sample.outcome === "corrected" && sample.predicted ? ` · AI: ${sample.predicted}` : "";
-    subLine.textContent = `${PORTAL_NAMES[sample.portal] || sample.portal} · ${sample.source || "gemini"} · ${sample.latencyMs}ms · ${timeStr}${predNote}`;
+      sample.outcome === "corrected" && sample.predicted ? ` · Gốc: ${sample.predicted}` : "";
+    subLine.textContent = `${PORTAL_NAMES[sample.portal] || sample.portal} · ${sample.source || "onnx-local"} · ${sample.latencyMs}ms · ${timeStr}${predNote}`;
 
     body.append(topLine, subLine);
     row.appendChild(body);
@@ -621,7 +592,7 @@ dsClearBtn.addEventListener("click", async () => {
 function renderLogsTable() {
   const portalFilter = logPortalFilter.value;
   const rows = cachedLogs.filter((item) => {
-    if (portalFilter !== "all" && item.portal !== portalFilter) return false;
+    if (!matchesPortalFilter(item.portal, portalFilter)) return false;
     if (logStatusFilter !== "all" && item.status !== logStatusFilter) return false;
     return true;
   });

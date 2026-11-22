@@ -7,6 +7,8 @@
 
   window.taxcapWatchCaptchas({
     portal: "tdt",
+    settingKey: "tdt",
+    cong: "thuedientu",
     findPairs,
     readImage: window.taxcapReadCanvasImage,
   });

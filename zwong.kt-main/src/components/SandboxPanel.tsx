@@ -11,22 +11,30 @@ import {
   randomCaptchaCode,
   type PortalId,
   type RetryState,
-  type SolveSpeedMode,
 } from '../utils/captchaLogic';
-import { rasterizeImageElement } from '../utils/imagePreprocess';
+import { ALL_PORTALS } from '../utils/allPortals';
+import { solveCaptchaInBrowser } from '../utils/localOnnxSolver';
 
 interface SandboxPanelProps {
-  geminiConfigured: boolean;
-  geminiKeyFormatValid?: boolean;
+  onnxReady?: boolean;
+  wasmReady?: boolean;
   onSolved?: () => void;
 }
 
+const MAIN_PORTAL_TO_CONG: Record<PortalId, string> = {
+  hddt: 'hddt',
+  tdt: 'thuedientu',
+  dvc: 'dichvucong',
+  tracuunnt: 'tracuunnt',
+};
+
 export const SandboxPanel: React.FC<SandboxPanelProps> = ({
-  geminiConfigured,
-  geminiKeyFormatValid = true,
+  onnxReady = true,
+  wasmReady = true,
   onSolved,
 }) => {
   const [portal, setPortal] = useState<PortalId>('hddt');
+  const [customCong, setCustomCong] = useState<string>('auto');
   const [expectedCode, setExpectedCode] = useState<string>(() => randomCaptchaCode(6));
   const [customImageSrc, setCustomImageSrc] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState<string>('');
@@ -35,10 +43,6 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
   const [lastSourceTag, setLastSourceTag] = useState<string>('');
   const [submitFeedback, setSubmitFeedback] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [autoSolveOnChange, setAutoSolveOnChange] = useState<boolean>(false);
-  const [localUxDemo, setLocalUxDemo] = useState<boolean>(false);
-  const [speedMode, setSpeedMode] = useState<SolveSpeedMode>('fast');
-  const [enhanceImage, setEnhanceImage] = useState<boolean>(true);
-  const [enhancedPreviewSrc, setEnhancedPreviewSrc] = useState<string | null>(null);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
   const lastSampleRef = useRef<{ sampleId: string; predicted: string } | null>(null);
@@ -49,7 +53,10 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
   const svgMarkup = buildSampleCaptchaSvg(expectedCode, portal);
   const generatedSrc = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgMarkup)))}`;
   const activeImageSrc = customImageSrc || generatedSrc;
-  const imageKey = customImageSrc ? `custom:${customImageSrc.slice(0, 64)}:${customImageSrc.length}` : `${portal}:${expectedCode}`;
+  const effectiveCong = customImageSrc && customCong !== 'auto' ? customCong : MAIN_PORTAL_TO_CONG[portal];
+  const imageKey = customImageSrc
+    ? `custom:${effectiveCong}:${customImageSrc.slice(0, 64)}:${customImageSrc.length}`
+    : `${portal}:${expectedCode}`;
 
   const runSolve = useCallback(
     async (mode: 'auto' | 'manual') => {
@@ -73,68 +80,60 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
       setRetryState(nextReading);
       setSubmitFeedback(null);
 
-      if (localUxDemo && !customImageSrc) {
-        await new Promise((r) => setTimeout(r, 320));
-        setInputValue(expectedCode);
-        setLastLatencyMs(320);
-        setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_SUCCESS', code: expectedCode }));
-        return;
-      }
-
       try {
-        const compactImage = await rasterizeImageElement(img, enhanceImage);
-        if (!compactImage) {
-          setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_FAILED' }));
-          return;
-        }
-        if (enhanceImage) {
-          setEnhancedPreviewSrc(compactImage);
-        } else {
-          setEnhancedPreviewSrc(null);
-        }
-
-        const svgDataUrl =
-          portal === 'hddt' &&
-          mode !== 'manual' &&
-          activeImageSrc.startsWith('data:image/svg+xml;base64,')
-            ? activeImageSrc
-            : undefined;
-
-        const res = await fetch('/api/captcha/solve', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-TaxCap-Sandbox': '1',
-          },
-          body: JSON.stringify({
-            portal,
-            image: compactImage,
-            svgDataUrl,
-            speedMode,
-            enhanced: enhanceImage,
-            bypassCache: mode === 'manual',
-          }),
+        const result = await solveCaptchaInBrowser({
+          img,
+          src: activeImageSrc,
+          cong: effectiveCong,
+          isHddt: effectiveCong === 'hddt',
+          skipTier1: mode === 'manual',
         });
-        const data = await res.json().catch(() => ({}));
 
-        if (res.ok && data.ok && data.captcha) {
-          lastSampleRef.current = data.sampleId
-            ? { sampleId: String(data.sampleId), predicted: String(data.captcha) }
-            : null;
-          setInputValue(data.captcha);
-          setLastLatencyMs(typeof data.latencyMs === 'number' ? data.latencyMs : null);
+        if (result.ok && result.captcha) {
           const tag =
-            data.source === 'svg-local'
-              ? 'SVG nội bộ'
-              : data.source === 'memory'
-                ? 'Trí nhớ AI'
-                : data.source === 'onnx'
-                  ? 'Model ONNX'
-                  : data.fewShotCount > 0
-                    ? `Kèm ${data.fewShotCount} ảnh mẫu`
-                    : '';
+            result.source === 'svg-local'
+              ? 'SVG mẫu (<5ms)'
+              : result.source === 'svg-sig'
+                ? 'SVG chữ ký'
+                : 'ONNX cục bộ (ddddocr)';
+
+          setInputValue(result.captcha);
+          setLastLatencyMs(result.latencyMs);
           setLastSourceTag(tag);
-          setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_SUCCESS', code: data.captcha }));
+          setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_SUCCESS', code: result.captcha }));
+
+          // Ghi nhận kết quả giải cục bộ vào Kho Dữ liệu & Nhật ký Studio (nếu backend đang chạy)
+          const recordPortal = customImageSrc && customCong !== 'auto' ? customCong : portal;
+          try {
+            const recRes = await fetch('/api/dataset/record-local', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-TaxCap-Sandbox': '1',
+              },
+              body: JSON.stringify({
+                portal: recordPortal,
+                captcha: result.captcha,
+                source: result.source,
+                confidence: result.confidence,
+                latencyMs: result.latencyMs,
+                image: result.thumbnail,
+                message: tag,
+              }),
+            });
+            const recData = await recRes.json().catch(() => ({}));
+            if (recRes.ok && recData?.sampleId) {
+              lastSampleRef.current = {
+                sampleId: String(recData.sampleId),
+                predicted: result.captcha,
+              };
+            } else {
+              lastSampleRef.current = null;
+            }
+          } catch {
+            lastSampleRef.current = null;
+          }
+
           onSolved?.();
         } else {
           setLastLatencyMs(null);
@@ -142,7 +141,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
           setRetryState((prev) =>
             nextRetryState(prev, {
               type: 'SOLVE_FAILED',
-              message: data.message || undefined,
+              message: result.message || undefined,
             }),
           );
           onSolved?.();
@@ -151,7 +150,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
         setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_FAILED' }));
       }
     },
-    [activeImageSrc, customImageSrc, enhanceImage, expectedCode, imageKey, localUxDemo, onSolved, portal, speedMode],
+    [activeImageSrc, customCong, customImageSrc, effectiveCong, imageKey, onSolved, portal],
   );
 
   useEffect(() => {
@@ -166,8 +165,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
   const handlePortalSelect = (nextPortal: PortalId) => {
     setPortal(nextPortal);
     setCustomImageSrc(null);
-    setEnhancedPreviewSrc(null);
-    setExpectedCode(randomCaptchaCode(6));
+    setExpectedCode(randomCaptchaCode(nextPortal === 'hddt' ? 6 : 5));
     setInputValue('');
     setLastLatencyMs(null);
     setLastSourceTag('');
@@ -177,8 +175,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
 
   const handleSimulatePortalRefresh = () => {
     setCustomImageSrc(null);
-    setEnhancedPreviewSrc(null);
-    setExpectedCode(randomCaptchaCode(6));
+    setExpectedCode(randomCaptchaCode(portal === 'hddt' ? 6 : 5));
     setInputValue('');
     setLastSourceTag('');
     setSubmitFeedback({
@@ -192,8 +189,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
 
   const handleNewSample = () => {
     setCustomImageSrc(null);
-    setEnhancedPreviewSrc(null);
-    setExpectedCode(randomCaptchaCode(6));
+    setExpectedCode(randomCaptchaCode(portal === 'hddt' ? 6 : 5));
     setInputValue('');
     setLastLatencyMs(null);
     setLastSourceTag('');
@@ -311,47 +307,6 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2">
-            <label htmlFor="speed-mode-select" className="text-xs font-medium text-slate-600 whitespace-nowrap">
-              Chế độ:
-            </label>
-            <select
-              id="speed-mode-select"
-              data-testid="speed-mode-select"
-              value={speedMode}
-              onChange={(e) => setSpeedMode(e.target.value === 'accurate' ? 'accurate' : 'fast')}
-              className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 focus:border-sky-600 focus:outline-none"
-            >
-              <option value="fast">Nhanh (Flash Lite)</option>
-              <option value="accurate">Chuẩn (Flash 4)</option>
-            </select>
-          </div>
-
-          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              data-testid="enhance-image-toggle"
-              checked={enhanceImage}
-              onChange={(e) => {
-                setEnhanceImage(e.target.checked);
-                if (!e.target.checked) setEnhancedPreviewSrc(null);
-              }}
-              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-600"
-            />
-            <span>Làm nét ảnh (Bước 2)</span>
-          </label>
-
-          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              data-testid="local-ux-demo-toggle"
-              checked={localUxDemo}
-              onChange={(e) => setLocalUxDemo(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-600"
-            />
-            <span>Thử UX nội bộ (không gọi API)</span>
-          </label>
-
           <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -365,16 +320,13 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
         </div>
       </div>
 
-      {(!geminiConfigured || !geminiKeyFormatValid) && (
+      {(!onnxReady || !wasmReady) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900 space-y-1">
           <div className="font-semibold">
-            {!geminiConfigured
-              ? 'Máy chủ chưa có GEMINI_API_KEY.'
-              : 'GEMINI_API_KEY hiện không đúng định dạng key Google AI Studio (AIza...).'}
+            Chưa tìm thấy đầy đủ mô hình ONNX cục bộ (ddddocr_old.onnx / ort-wasm-simd-threaded.wasm).
           </div>
           <div>
-            Vào mục <span className="font-semibold">Settings &gt; Secrets</span> của AI Studio, kiểm tra hoặc dán lại API key lấy từ{' '}
-            <code className="font-mono">aistudio.google.com</code> (không để khoảng trắng/dấu ngoặc kép, không giới hạn HTTP Referrer). Trong lúc chờ gắn key, bạn có thể bật <span className="font-semibold">Thử UX nội bộ (không gọi API)</span> ở góc trên bên phải.
+            Vui lòng kiểm tra thư mục <code className="font-mono">extension/thu_vien/</code> trên máy chủ để đảm bảo bộ giải ONNX cục bộ hoạt động bình thường.
           </div>
         </div>
       )}
@@ -428,22 +380,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
                       className="max-h-full max-w-full object-contain"
                     />
                   </div>
-                  {enhancedPreviewSrc && (
-                    <span className="text-[10px] text-slate-400">Ảnh gốc</span>
-                  )}
                 </div>
-                {enhancedPreviewSrc && (
-                  <div className="flex flex-col items-center gap-0.5">
-                    <div className="flex h-12 w-36 items-center justify-center overflow-hidden rounded-lg border border-sky-200 bg-white p-1">
-                      <img
-                        src={enhancedPreviewSrc}
-                        alt="Ảnh sau làm nét"
-                        className="max-h-full max-w-full object-contain"
-                      />
-                    </div>
-                    <span className="text-[10px] text-sky-700 font-medium">Đã làm nét</span>
-                  </div>
-                )}
 
                 {/* Input with embedded mini retry button at right corner */}
                 <div className="relative flex-1 min-w-[200px]">
@@ -465,7 +402,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
                     data-testid="mini-retry-btn"
                     onClick={() => runSolve('manual')}
                     disabled={retryState.status === 'reading'}
-                    title="Giải lại ảnh captcha này"
+                    title="Giải lại ảnh captcha này (ép chạy tầng kế tiếp / ONNX)"
                     aria-label="Giải lại mã captcha"
                     className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
                   >
@@ -479,7 +416,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
               {/* Inline Status Line right below captcha input */}
               <div className="mt-2 flex items-center justify-between gap-3 text-xs">
                 <span data-testid="captcha-status" className={statusTone}>
-                  {retryState.message || 'Sẵn sàng — bấm "Đọc Captcha bằng Gemini" hoặc nút xoay tròn'}
+                  {retryState.message || 'Sẵn sàng — bấm "Giải Captcha cục bộ (SVG / ONNX)" hoặc nút xoay tròn'}
                 </span>
                 <span className="font-mono tabular-nums text-slate-500 whitespace-nowrap shrink-0">
                   Lần thử: {retryState.autoAttempts}/{retryState.maxRetries}
@@ -498,7 +435,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
                 disabled={retryState.status === 'reading' || retryState.status === 'locked'}
                 className="whitespace-nowrap shrink-0 rounded-lg bg-sky-700 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Đọc Captcha bằng Gemini
+                Giải Captcha cục bộ (SVG / ONNX)
               </button>
 
               <button
@@ -542,12 +479,34 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
 
         {/* Right: Real Image Upload & Safety Spec */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-5">
-            <h3 className="text-sm font-semibold text-slate-900">Thử với ảnh Captcha thật</h3>
-            <p className="mt-1 text-xs leading-relaxed text-slate-600">
-              Tải lên ảnh chụp captcha PNG, JPG hoặc SVG từ trang Thuế để kiểm tra trực tiếp khả năng đọc của Gemini Flash.
-            </p>
-            <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-700 hover:border-sky-600 hover:bg-sky-50/40">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Thử với ảnh Captcha thật</h3>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                Tải lên ảnh chụp captcha PNG, JPG hoặc SVG từ bất kỳ cổng nào trong 46 cổng hỗ trợ để kiểm tra trực tiếp bộ giải cục bộ (SVG 3 tầng &amp; ONNX <code className="font-mono">ddddocr_old.onnx</code>) ngay trên trình duyệt.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="custom-cong-select" className="block text-[11px] font-medium text-slate-600 mb-1">
+                Hậu xử lý theo cổng (khi tải ảnh thật):
+              </label>
+              <select
+                id="custom-cong-select"
+                value={customCong}
+                onChange={(e) => setCustomCong(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 focus:border-sky-600 focus:outline-none"
+              >
+                <option value="auto">Tự động theo tab đang chọn ({activeMeta.shortName})</option>
+                {ALL_PORTALS.map((p) => (
+                  <option key={p.hostname} value={p.cong}>
+                    {p.name} ({p.hostname})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-medium text-slate-700 hover:border-sky-600 hover:bg-sky-50/40">
               <Upload className="h-4 w-4 text-slate-500" />
               <span>Chọn tệp ảnh (.png, .jpg, .svg)</span>
               <input
@@ -575,7 +534,7 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
                 <span className="font-semibold text-slate-800">2. Giới hạn tự thử lại 3/3:</span> Chặn vòng lặp vô hạn khi cổng thuế đổi ảnh liên tục, tránh khóa tài khoản. Bấm nút xoay tròn góc ô nhập để ép đọc lại bất kỳ lúc nào.
               </li>
               <li>
-                <span className="font-semibold text-slate-800">3. Chỉ điền, không tự gửi:</span> Kích hoạt đúng sự kiện React/jQuery để web nhận giá trị, giữ quyền bấm Enter thuộc về người dùng.
+                <span className="font-semibold text-slate-800">3. Chỉ điền, không tự gửi &amp; 100% cục bộ:</span> Kích hoạt đúng sự kiện React/Angular/jQuery, giải trực tiếp bằng SVG + ONNX WASM ngay trên máy, không gửi ảnh ra ngoài.
               </li>
             </ul>
           </div>

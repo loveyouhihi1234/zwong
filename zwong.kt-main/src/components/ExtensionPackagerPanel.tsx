@@ -7,10 +7,6 @@ import {
 } from '../utils/browserExtensionZip';
 import { SHEETS_URL_STORAGE_KEY } from './UsersAdminPanel';
 
-interface ExtensionPackagerPanelProps {
-  tokenRequired?: boolean;
-}
-
 type GroupFilter = 'all' | ExtensionFileGroup;
 
 const GROUP_TABS: { id: GroupFilter; label: string }[] = [
@@ -21,13 +17,10 @@ const GROUP_TABS: { id: GroupFilter; label: string }[] = [
   { id: 'captcha', label: 'Tab 3: Captcha' },
 ];
 
-export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ tokenRequired = false }) => {
-  const [connectionMode, setConnectionMode] = useState<'direct' | 'proxy'>('direct');
+export const ExtensionPackagerPanel: React.FC = () => {
   const [licenseApiUrl, setLicenseApiUrl] = useState<string>(
     () => localStorage.getItem(SHEETS_URL_STORAGE_KEY) || '',
   );
-  const [apiBaseUrl, setApiBaseUrl] = useState<string>(() => window.location.origin);
-  const [accessToken, setAccessToken] = useState<string>('');
   const [groupFilter, setGroupFilter] = useState<GroupFilter>('all');
   const [selectedPath, setSelectedPath] = useState<string>('manifest.json');
   const [copied, setCopied] = useState<boolean>(false);
@@ -37,12 +30,9 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
   const files = useMemo(
     () =>
       buildBrowserExtensionFiles({
-        connectionMode,
-        apiBaseUrl,
-        accessToken,
         licenseApiUrl,
       }),
-    [connectionMode, apiBaseUrl, accessToken, licenseApiUrl],
+    [licenseApiUrl],
   );
 
   const visibleFiles = useMemo(
@@ -73,12 +63,26 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
     setDownloading(true);
     setDownloadError('');
     try {
-      const { blob } = await buildBrowserExtensionZipBlob({
-        connectionMode,
-        apiBaseUrl,
-        accessToken,
-        licenseApiUrl,
-      });
+      const qs = licenseApiUrl.trim()
+        ? `?licenseApiUrl=${encodeURIComponent(licenseApiUrl.trim())}`
+        : '';
+      let blob: Blob | null = null;
+
+      try {
+        const res = await fetch(`/api/extension/bundle${qs}`);
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/zip')) {
+          blob = await res.blob();
+        }
+      } catch {
+        blob = null;
+      }
+
+      if (!blob) {
+        const built = await buildBrowserExtensionZipBlob({ licenseApiUrl });
+        blob = built.blob;
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -106,7 +110,7 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
                 Một gói cài đặt duy nhất gồm 3 tab trên thanh Side Panel:{' '}
                 <span className="font-semibold text-slate-800">1. Tải HĐĐT</span>,{' '}
                 <span className="font-semibold text-slate-800">2. Tải Hồ sơ thuế</span> và{' '}
-                <span className="font-semibold text-slate-800">3. Tự điền Captcha</span> — dùng chung 1 mã kích hoạt Google Sheets và 1 bộ giải SVG cho cổng Hóa đơn điện tử.
+                <span className="font-semibold text-slate-800">3. Tự điền Captcha (46 cổng)</span> — dùng chung 1 mã kích hoạt Google Sheets và giải Captcha cục bộ 100% bằng SVG + ONNX WASM.
               </p>
             </div>
 
@@ -124,9 +128,9 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
-                <div className="font-semibold text-slate-900">Tab 3 · Captcha</div>
+                <div className="font-semibold text-slate-900">Tab 3 · Captcha (46 cổng)</div>
                 <p className="mt-0.5 text-[11px] text-slate-600">
-                  Tự điền 4 cổng Thuế/DVC, 4 tab con (Captcha, Cấu hình, Kho dữ liệu, Nhật ký).
+                  Tự điền 4 cổng Thuế chính + 42 cổng mở rộng (BHXH, Hải quan, Ngân hàng, NCC Hóa đơn) hoàn toàn offline.
                 </p>
               </div>
             </div>
@@ -148,86 +152,23 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setConnectionMode('direct')}
-                className={`rounded-lg border p-3 text-left transition-colors ${
-                  connectionMode === 'direct'
-                    ? 'border-sky-600 bg-sky-50/70'
-                    : 'border-slate-200 bg-white hover:bg-slate-50'
-                }`}
-              >
-                <div className="text-xs font-semibold text-slate-900">Độc lập 100% (Khuyên dùng)</div>
-                <div className="mt-0.5 text-[11px] text-slate-600">
-                  Dán Gemini API Key trong tab Captcha → Cấu hình. Hoạt động hoàn toàn cục bộ, không cần server.
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setConnectionMode('proxy')}
-                className={`rounded-lg border p-3 text-left transition-colors ${
-                  connectionMode === 'proxy'
-                    ? 'border-sky-600 bg-sky-50/70'
-                    : 'border-slate-200 bg-white hover:bg-slate-50'
-                }`}
-              >
-                <div className="text-xs font-semibold text-slate-900">Qua Backend Proxy (Tùy chọn)</div>
-                <div className="mt-0.5 text-[11px] text-slate-600">
-                  Dùng chung API Key, Kho dữ liệu và model ONNX qua một server riêng.
-                </div>
-              </button>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3.5 py-3 text-xs leading-relaxed text-emerald-950 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-semibold text-emerald-900">
+                <ShieldCheck className="h-4 w-4 text-emerald-700" />
+                <span>Giải Captcha cục bộ 100% · Nhúng sẵn ONNX WASM · Không cần API Key</span>
+              </div>
+              <ul className="list-disc pl-4 space-y-1 text-emerald-900">
+                <li>
+                  <span className="font-semibold">Bảo vệ bản quyền toàn bộ 3 tab:</span> Chưa kích hoạt hoặc hết hạn sẽ khóa đồng thời Side Panel, tự điền Captcha trên cả 46 cổng và lệnh tải tệp HĐĐT/Hồ sơ.
+                </li>
+                <li>
+                  <span className="font-semibold">HĐĐT dự phòng 3 tầng:</span> SVG mẫu font (&lt;5ms) → SVG chữ ký nét → ONNX cục bộ (<code className="font-mono">ddddocr_old.onnx</code>) dùng chung cho cả đăng nhập và tra hóa đơn máy tính tiền.
+                </li>
+                <li>
+                  <span className="font-semibold">Độc lập hoàn toàn:</span> Mô hình <code className="font-mono">ddddocr_old.onnx</code> và <code className="font-mono">ort-wasm-simd-threaded.wasm</code> được đóng gói sẵn trong tệp zip, không cần máy chủ hay API Key bên ngoài.
+                </li>
+              </ul>
             </div>
-
-            {connectionMode === 'direct' ? (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-3.5 py-3 text-xs leading-relaxed text-emerald-950 space-y-1.5">
-                <div className="flex items-center gap-1.5 font-semibold text-emerald-900">
-                  <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                  <span>Khóa bản quyền chung 2 lớp · Không gián đoạn khi chuyển tab</span>
-                </div>
-                <ul className="list-disc pl-4 space-y-1 text-emerald-900">
-                  <li>
-                    <span className="font-semibold">Bảo vệ toàn bộ 3 tab:</span> Chưa kích hoạt hoặc hết hạn sẽ khóa đồng thời Side Panel, tự điền Captcha và lệnh tải tệp HĐĐT/Hồ sơ.
-                  </li>
-                  <li>
-                    <span className="font-semibold">Dùng chung bộ giải SVG:</span> Nạp một lần duy nhất trên <code className="font-mono">hoadondientu.gdt.gov.vn</code> cho cả đăng nhập và tra hóa đơn máy tính tiền.
-                  </li>
-                </ul>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label htmlFor="proxy-url-input" className="block text-xs font-medium text-slate-700">
-                      URL Backend Proxy (API Server)
-                    </label>
-                    <input
-                      id="proxy-url-input"
-                      type="url"
-                      value={apiBaseUrl}
-                      onChange={(e) => setApiBaseUrl(e.target.value)}
-                      placeholder="https://your-proxy-url.run.app"
-                      className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label htmlFor="team-token-input" className="block text-xs font-medium text-slate-700">
-                      {tokenRequired ? 'Mã truy cập nhóm (Bắt buộc)' : 'Mã truy cập nhóm (Tùy chọn)'}
-                    </label>
-                    <input
-                      id="team-token-input"
-                      type="text"
-                      value={accessToken}
-                      onChange={(e) => setAccessToken(e.target.value)}
-                      placeholder={tokenRequired ? 'Nhập đúng EXTENSION_SHARED_TOKEN' : 'Để trống nếu không đặt mật khẩu'}
-                      className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900 focus:border-sky-600 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
 
             {downloadError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -238,7 +179,7 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
 
           <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
             <span className="text-xs text-slate-500 tabular-nums">
-              Gói zip gồm {files.length} tệp mã nguồn + 5 tệp font PDF/UI + 2 icon PNG 48/128px.
+              Gói zip gồm {files.length} tệp mã nguồn + ddddocr_old.onnx + ONNX WASM + 5 font PDF/UI + 2 icon PNG (~25 MB).
             </span>
             <button
               type="button"
@@ -278,7 +219,7 @@ export const ExtensionPackagerPanel: React.FC<ExtensionPackagerPanelProps> = ({ 
               <span className="font-semibold text-slate-900">Bước 5:</span> Bấm biểu tượng{' '}
               <span className="font-semibold text-slate-800">TaxCap Suite</span> để mở thanh <span className="font-semibold text-slate-800">Side Panel</span> → nhập{' '}
               <span className="font-semibold text-slate-800">Mã kích hoạt</span> để mở khóa cả 3 tab{' '}
-              <span className="font-semibold text-slate-800">Tải HĐĐT · Tải Hồ sơ · Captcha</span> (dán Gemini API Key trong tab <span className="font-semibold text-slate-800">Captcha → Cấu hình</span>).
+              <span className="font-semibold text-slate-800">Tải HĐĐT · Tải Hồ sơ · Captcha</span> (bộ giải SVG + ONNX cục bộ chạy sẵn ngay, không cần API Key).
             </li>
           </ol>
         </div>
