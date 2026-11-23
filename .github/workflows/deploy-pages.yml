@@ -17,9 +17,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: zwong.kt-main
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,19 +25,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: zwong.kt-main/package-lock.json
+
+      - name: Detect app directory
+        id: appdir
+        shell: bash
+        run: |
+          if [ -f "zwong.kt-main/vite.config.ts" ]; then
+            echo "dir=zwong.kt-main" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install dependencies
-        run: npm ci
+        working-directory: ${{ steps.appdir.outputs.dir }}
+        shell: bash
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
 
       - name: Build TaxCap Studio static site
+        working-directory: ${{ steps.appdir.outputs.dir }}
         run: npm run build
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: zwong.kt-main/dist
+          path: ${{ steps.appdir.outputs.dir }}/dist
 
   deploy:
     environment:
