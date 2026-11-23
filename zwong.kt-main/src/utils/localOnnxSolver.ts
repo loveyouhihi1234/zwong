@@ -79,10 +79,10 @@ let svgEnginesPromise: Promise<void> | null = null;
 async function ensureSvgEngines(): Promise<void> {
   if (!svgEnginesPromise) {
     svgEnginesPromise = (async () => {
-      await loadScriptOnce('/local-solver/captcha-svg-templates.js');
-      await loadScriptOnce('/local-solver/captcha-svg.js');
-      await loadScriptOnce('/local-solver/bang_svg.js');
-      await loadScriptOnce('/local-solver/giai_svg.js');
+      await loadScriptOnce('./local-solver/captcha-svg-templates.js');
+      await loadScriptOnce('./local-solver/captcha-svg.js');
+      await loadScriptOnce('./local-solver/bang_svg.js');
+      await loadScriptOnce('./local-solver/giai_svg.js');
     })().catch((err) => {
       svgEnginesPromise = null;
       throw err;
@@ -99,20 +99,20 @@ let onnxRuntimePromise: Promise<{
 async function ensureOnnxRuntime() {
   if (!onnxRuntimePromise) {
     onnxRuntimePromise = (async () => {
-      await loadScriptOnce('/thu_vien/ort/ort.wasm.min.js');
-      await loadScriptOnce('/local-solver/tien_ich_png.js');
+      await loadScriptOnce('./thu_vien/ort/ort.wasm.min.js');
+      await loadScriptOnce('./local-solver/tien_ich_png.js');
       const ort = window.ort;
       if (!ort || !window.QltPng) {
         throw new Error('Không khởi tạo được ONNX Runtime Web hoặc QltPng');
       }
-      ort.env.wasm.wasmPaths = '/thu_vien/ort/';
+      ort.env.wasm.wasmPaths = new URL('./thu_vien/ort/', window.location.href).href;
       ort.env.wasm.numThreads = 1;
       ort.env.wasm.proxy = false;
       (ort.env as Record<string, unknown>).logLevel = 'error';
 
       const [modelRes, charsetRes] = await Promise.all([
-        fetch('/thu_vien/ddddocr_old.onnx'),
-        fetch('/thu_vien/charset.json'),
+        fetch('./thu_vien/ddddocr_old.onnx'),
+        fetch('./thu_vien/charset.json'),
       ]);
       if (!modelRes.ok) throw new Error('Không tải được mô hình ddddocr_old.onnx');
       if (!charsetRes.ok) throw new Error('Không tải được bảng ký tự charset.json');

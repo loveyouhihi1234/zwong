@@ -6,19 +6,6 @@
   const inputWidgets = new WeakMap();
   const EXT_ID = typeof chrome !== "undefined" && chrome.runtime?.id ? chrome.runtime.id : "taxcap-suite";
 
-  function sendFeedback(st, outcome, finalLabel) {
-    if (!st.lastSampleId || st.feedbackSent) return;
-    st.feedbackSent = true;
-    chrome.runtime
-      .sendMessage({
-        type: "TAXCAP_FEEDBACK",
-        sampleId: st.lastSampleId,
-        outcome,
-        finalLabel,
-      })
-      .catch(() => {});
-  }
-
   function getState(input) {
     let st = inputStates.get(input);
     if (!st) {
@@ -28,9 +15,6 @@
         lastKey: null,
         lastSource: "",
         solving: false,
-        lastSampleId: "",
-        predictedCode: "",
-        feedbackSent: false,
       };
       inputStates.set(input, st);
       input.addEventListener("input", (e) => {
@@ -40,16 +24,6 @@
           renderWidget(input, st);
         }
       });
-
-      const form = input.form || input.closest("form");
-      if (form) {
-        form.addEventListener("submit", () => {
-          const val = String(input.value || "").trim().replace(/[^A-Za-z0-9]/g, "");
-          if (!st.lastSampleId || st.feedbackSent || val.length < 2) return;
-          const outcome = val === st.predictedCode ? "verified" : "corrected";
-          sendFeedback(st, outcome, val);
-        });
-      }
     }
     return st;
   }
@@ -331,14 +305,6 @@
       const prevSource = st.lastSource;
 
       if (manual) {
-        if (st.lastSampleId && !st.feedbackSent) {
-          const edited = String(input.value || "").trim().replace(/[^A-Za-z0-9]/g, "");
-          if (edited && edited !== st.predictedCode) {
-            sendFeedback(st, "corrected", edited);
-          } else {
-            sendFeedback(st, "rejected", "");
-          }
-        }
         st.attempts = 1;
       } else {
         if (st.solving) return;
@@ -354,9 +320,6 @@
 
       st.lastKey = key;
       st.errorText = "";
-      st.lastSampleId = "";
-      st.predictedCode = "";
-      st.feedbackSent = false;
 
       // Tầng cục bộ tức thì (HĐĐT SVG Tầng 1/2, cổng văn bản/SVG chữ):
       // Bấm "Giải lại" ngay sau svg-local trên cùng ảnh sẽ bỏ qua Tầng 1 để kiểm tra chéo sang Tầng 2/ONNX.
@@ -373,29 +336,19 @@
         }
         if (localRes?.captcha) {
           fillInputSafely(input, localRes.captcha);
-          st.predictedCode = localRes.captcha;
           st.lastSource = localRes.source || "svg-local";
           st.status = "filled";
           st.solving = false;
           renderWidget(input, st);
 
-          Promise.resolve(readImage(img))
-            .then((compactImage) =>
-              chrome.runtime.sendMessage({
-                type: "TAXCAP_RECORD_LOCAL",
-                portal,
-                cong: solverCong,
-                source: localRes.source || "svg-local",
-                captcha: localRes.captcha,
-                confidence: localRes.confidence,
-                latencyMs: localRes.latencyMs,
-                image: compactImage || "",
-              }),
-            )
-            .then((res) => {
-              if (res?.sampleId && st.predictedCode === localRes.captcha) {
-                st.lastSampleId = res.sampleId;
-              }
+          chrome.runtime
+            .sendMessage({
+              type: "TAXCAP_RECORD_LOCAL",
+              portal,
+              cong: solverCong,
+              source: localRes.source || "svg-local",
+              captcha: localRes.captcha,
+              latencyMs: localRes.latencyMs,
             })
             .catch(() => {});
           return;
@@ -415,7 +368,6 @@
           return;
         }
         const pixelSig = imagePixelSig(raw);
-        const thumbnail = (await readImage(img)) || "";
 
         const res = await chrome.runtime.sendMessage({
           type: "TAXCAP_SOLVE_ONNX",
@@ -425,8 +377,6 @@
           w: raw.w,
           h: raw.h,
           sig: pixelSig,
-          image: thumbnail,
-          bypassCache: manual,
         });
 
         // Bỏ qua kết quả nếu ảnh captcha đã bị đổi trong lúc đang chạy ONNX
@@ -440,10 +390,7 @@
 
         if (res?.ok && res.captcha) {
           fillInputSafely(input, res.captcha);
-          st.lastSampleId = res.sampleId || "";
-          st.predictedCode = res.captcha;
           st.lastSource = res.source || "onnx-local";
-          st.feedbackSent = false;
           st.status = "filled";
         } else {
           st.status = st.attempts >= MAX_AUTO_RETRIES ? "locked" : "failed";

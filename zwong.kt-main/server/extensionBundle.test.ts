@@ -165,7 +165,20 @@ test('all TAXCAP_* runtime messages sent by sidepanel, panels, and content scrip
     }
   }
 
-  assert.ok(sentTypes.size >= 10, 'Expected at least 10 TAXCAP_* runtime message types');
+  assert.ok(sentTypes.size >= 8, 'Expected at least 8 TAXCAP_* runtime message types');
+  for (const removedType of [
+    'TAXCAP_FEEDBACK',
+    'TAXCAP_GET_DATASET',
+    'TAXCAP_CLEAR_DATASET',
+    'TAXCAP_POPUP_UPDATE_SAMPLE',
+    'TAXCAP_GET_LOGS',
+    'TAXCAP_CLEAR_LOGS',
+    'TAXCAP_GET_MEMORY_STATS',
+    'TAXCAP_CLEAR_MEMORY',
+  ]) {
+    assert.equal(sentTypes.has(removedType), false, `Removed message type should not be sent: ${removedType}`);
+    assert.equal(bg.includes(removedType), false, `Removed handler should not remain in background.js: ${removedType}`);
+  }
   for (const msgType of sentTypes) {
     assert.equal(
       bg.includes(`"${msgType}"`) || bg.includes(`'${msgType}'`),
@@ -175,7 +188,7 @@ test('all TAXCAP_* runtime messages sent by sidepanel, panels, and content scrip
   }
 });
 
-test('UI & reliability guarantees preserved: HDDT log visible + instant abort, Hoso 4 presets, Captcha dedupe & 3-tier HDDT', async () => {
+test('UI & reliability guarantees preserved: HDDT log visible + instant abort, Hoso 4 presets, Captcha dedupe, 2 sub-tabs only (no Dataset/Logs), and Today counter', async () => {
   const { files } = await buildExtensionArtifacts({ includeZip: false });
   const get = (p: string) => files.find((f) => f.path === p)?.content || '';
 
@@ -212,7 +225,18 @@ test('UI & reliability guarantees preserved: HDDT log visible + instant abort, H
 
   const captchaPanelHtml = get('panels/captcha/index.html');
   assert.equal(captchaPanelHtml.includes('geminiApiKey'), false, 'Captcha panel must not contain Gemini API Key input');
+  assert.equal(captchaPanelHtml.includes('data-tab="captcha"'), true, 'Captcha panel must keep Captcha sub-tab');
+  assert.equal(captchaPanelHtml.includes('data-tab="config"'), true, 'Captcha panel must keep Cấu hình sub-tab');
+  assert.equal(captchaPanelHtml.includes('data-tab="dataset"'), false, 'Captcha panel must NOT contain Kho dữ liệu sub-tab');
+  assert.equal(captchaPanelHtml.includes('data-tab="logs"'), false, 'Captcha panel must NOT contain Nhật ký sub-tab');
+  assert.equal(captchaPanelHtml.includes('memoryStatsText'), false, 'Captcha panel must NOT contain local memory stats');
+  assert.equal(captchaPanelHtml.includes('id="statSolved"'), true, 'Captcha panel must keep Today Solved counter');
+  assert.equal(captchaPanelHtml.includes('id="statFailed"'), true, 'Captcha panel must keep Today Failed counter');
   assert.equal(captchaPanelHtml.includes('ext_gov'), true, 'Captcha panel must include ext_gov group toggle');
   assert.equal(captchaPanelHtml.includes('ext_bank'), true, 'Captcha panel must include ext_bank group toggle');
   assert.equal(captchaPanelHtml.includes('ext_invoice'), true, 'Captcha panel must include ext_invoice group toggle');
+
+  // Verify packaged extension stays completely clean of demo-only shim
+  assert.equal(files.some((f) => f.path.includes('demo-chrome-shim')), false);
+  assert.equal(get('sidepanel.html').includes('demo-chrome-shim'), false);
 });

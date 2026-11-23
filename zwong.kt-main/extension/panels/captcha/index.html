@@ -40,17 +40,17 @@
       }
       .tabs {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 4px;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
         padding: 0 10px 8px;
       }
       .tab-btn {
         border: 1px solid transparent;
         background: #f1f5f9;
         color: #475569;
-        font-size: 11.5px;
+        font-size: 12px;
         font-weight: 600;
-        padding: 6px 4px;
+        padding: 6px 8px;
         border-radius: 6px;
         cursor: pointer;
         text-align: center;
@@ -229,140 +229,6 @@
       }
       .stats { display: flex; gap: 20px; font-variant-numeric: tabular-nums; }
       .stat-num { font-size: 18px; font-weight: 700; }
-      .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 6px;
-        margin-bottom: 10px;
-      }
-      .kpi-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 8px;
-        padding: 7px 8px;
-      }
-      .kpi-label { font-size: 10.5px; color: #64748b; }
-      .kpi-val {
-        margin-top: 2px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 14px;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-      }
-      .portal-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px;
-      }
-      .portal-card {
-        border: 1px solid #e2e8f0;
-        background: #f8fafc;
-        border-radius: 6px;
-        padding: 7px 8px;
-      }
-      .portal-head {
-        display: flex;
-        justify-content: space-between;
-        font-size: 11px;
-        font-weight: 600;
-      }
-      .progress-track {
-        height: 4px;
-        background: #e2e8f0;
-        border-radius: 999px;
-        margin: 5px 0 4px;
-        overflow: hidden;
-      }
-      .progress-fill {
-        height: 100%;
-        background: #0b6bcb;
-        border-radius: 999px;
-      }
-      .portal-meta {
-        display: flex;
-        justify-content: space-between;
-        font-size: 10.5px;
-        color: #64748b;
-      }
-      .portal-confusion {
-        margin-top: 3px;
-        font-size: 10px;
-        color: #0369a1;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-      .toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        margin-bottom: 8px;
-        flex-wrap: wrap;
-      }
-      .toolbar select {
-        width: auto;
-        margin-bottom: 0;
-        padding: 3px 6px;
-        font-size: 11px;
-      }
-      .pill-group {
-        display: inline-flex;
-        background: #f1f5f9;
-        padding: 2px;
-        border-radius: 6px;
-        gap: 2px;
-      }
-      .pill-btn {
-        border: none;
-        background: transparent;
-        padding: 3px 7px;
-        font-size: 11px;
-        border-radius: 4px;
-        color: #475569;
-      }
-      .pill-btn.active {
-        background: #ffffff;
-        color: #0f172a;
-        font-weight: 600;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-      }
-      .sample-list { display: flex; flex-direction: column; gap: 6px; }
-      .sample-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-        background: #ffffff;
-      }
-      .sample-thumb {
-        width: 78px;
-        height: 28px;
-        object-fit: contain;
-        border: 1px solid #e2e8f0;
-        border-radius: 4px;
-        background: #ffffff;
-        flex-shrink: 0;
-      }
-      .sample-thumb-empty {
-        width: 78px;
-        height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 1px dashed #cbd5e1;
-        border-radius: 4px;
-        font-size: 10px;
-        color: #94a3b8;
-        flex-shrink: 0;
-      }
-      .sample-body { flex: 1; min-width: 0; }
-      .sample-code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-weight: 700;
-        font-size: 12px;
-      }
-      .sample-sub { font-size: 10.5px; color: #64748b; }
       .badge {
         display: inline-block;
         padding: 1px 5px;
@@ -371,52 +237,7 @@
         font-weight: 600;
       }
       .badge.verified { background: #dcfce7; color: #166534; }
-      .badge.corrected { background: #dbeafe; color: #1e40af; }
-      .badge.pending { background: #fef3c7; color: #92400e; }
-      .badge.rejected { background: #fee2e2; color: #991b1b; }
-      .edit-input {
-        width: 74px !important;
-        margin-bottom: 0 !important;
-        padding: 2px 5px !important;
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 11.5px;
-      }
-      table.log-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 11px;
-      }
-      table.log-table th {
-        text-align: left;
-        padding: 6px 6px;
-        background: #f8fafc;
-        border-bottom: 1px solid #e2e8f0;
-        color: #64748b;
-        font-weight: 600;
-      }
-      table.log-table td {
-        padding: 6px 6px;
-        border-bottom: 1px solid #f1f5f9;
-        vertical-align: top;
-      }
       .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
-      .empty-box {
-        text-align: center;
-        padding: 18px 10px;
-        color: #64748b;
-        font-size: 11.5px;
-      }
-      .mem-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid #f1f5f9;
-        font-size: 11px;
-        color: #475569;
-      }
     </style>
   </head>
   <body>
@@ -435,8 +256,6 @@
       <nav class="tabs" role="tablist" aria-label="Trang chức năng TaxCap">
         <button type="button" role="tab" class="tab-btn active" data-tab="captcha" aria-selected="true">Captcha</button>
         <button type="button" role="tab" class="tab-btn" data-tab="config" aria-selected="false">Cấu hình</button>
-        <button type="button" role="tab" class="tab-btn" data-tab="dataset" aria-selected="false">Kho dữ liệu</button>
-        <button type="button" role="tab" class="tab-btn" data-tab="logs" aria-selected="false">Nhật ký</button>
       </nav>
     </header>
 
@@ -585,119 +404,10 @@
         </div>
         <button type="button" class="primary" id="pingBtn" style="width:100%;">Kiểm tra nạp mô hình ONNX</button>
         <div class="status" id="pingStatus"></div>
-
-        <div class="mem-bar">
-          <span id="memoryStatsText">Trí nhớ cục bộ: 0 mẫu học · 0 ảnh nhớ</span>
-          <button type="button" class="sm hidden" id="clearMemoryBtn">Xóa trí nhớ</button>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-title">Trí nhớ phản hồi cục bộ</div>
-        <div class="sub" style="line-height:1.5;">
-          Mỗi lần bạn xác nhận hoặc sửa tay mã captcha trên trang Thuế (hoặc trong tab <strong>Kho dữ liệu</strong>), ảnh mẫu và nhãn chuẩn được lưu vào <code class="mono">chrome.storage.local</code> để trả tức thì nếu gặp lại đúng ảnh đó.
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 3: KHO DỮ LIỆU -->
-    <section id="panel-dataset" class="tab-panel hidden">
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Tổng mẫu</div>
-          <div class="kpi-val" id="dsTotal">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Đủ chuẩn</div>
-          <div class="kpi-val" id="dsUsable" style="color:#0369a1;">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Chính xác</div>
-          <div class="kpi-val" id="dsAccuracy" style="color:#15803d;">—</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Chờ nhãn</div>
-          <div class="kpi-val" id="dsPending" style="color:#b45309;">0</div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-title">
-          <span>Tiến độ &amp; Độ chính xác theo cổng</span>
-          <span class="sub">Lưu cục bộ</span>
-        </div>
-        <div id="dsPortalsGrid" class="portal-grid"></div>
-      </div>
-
-      <div class="section">
-        <div class="toolbar">
-          <select id="dsPortalFilter" aria-label="Lọc mẫu theo cổng">
-            <option value="all">Tất cả cổng</option>
-            <option value="hddt">HĐĐT</option>
-            <option value="tdt">Thuế ĐT</option>
-            <option value="dvc">DVC Thuế</option>
-            <option value="tracuunnt">Tra cứu NNT</option>
-            <option value="extended">Cổng mở rộng</option>
-          </select>
-          <div style="display:flex;gap:4px;">
-            <button type="button" class="sm" id="dsRefreshBtn">Làm mới</button>
-            <button type="button" class="sm" id="dsExportBtn">Xuất JSON</button>
-            <button type="button" class="sm" id="dsClearBtn">Xóa kho</button>
-          </div>
-        </div>
-        <div id="dsSampleList" class="sample-list"></div>
-      </div>
-    </section>
-
-    <!-- TAB 4: NHẬT KÝ -->
-    <section id="panel-logs" class="tab-panel hidden">
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Tổng lượt</div>
-          <div class="kpi-val" id="logTotal">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Thành công</div>
-          <div class="kpi-val" id="logOk" style="color:#15803d;">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Lỗi</div>
-          <div class="kpi-val" id="logErr" style="color:#b91c1c;">0</div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Độ trễ TB</div>
-          <div class="kpi-val" id="logLatency">0 ms</div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="toolbar">
-          <div style="display:flex;gap:4px;align-items:center;">
-            <select id="logPortalFilter" aria-label="Lọc nhật ký theo cổng">
-              <option value="all">Tất cả cổng</option>
-              <option value="hddt">HĐĐT</option>
-              <option value="tdt">Thuế ĐT</option>
-              <option value="dvc">DVC Thuế</option>
-              <option value="tracuunnt">Tra cứu NNT</option>
-              <option value="extended">Cổng mở rộng</option>
-            </select>
-            <div class="pill-group" id="logStatusPills">
-              <button type="button" class="pill-btn active" data-status="all">Tất cả</button>
-              <button type="button" class="pill-btn" data-status="ok">Đúng</button>
-              <button type="button" class="pill-btn" data-status="error">Lỗi</button>
-            </div>
-          </div>
-          <div style="display:flex;gap:4px;">
-            <button type="button" class="sm" id="logRefreshBtn">Làm mới</button>
-            <button type="button" class="sm" id="logClearBtn">Xóa</button>
-          </div>
-        </div>
-        <div id="logTableWrap"></div>
       </div>
     </section>
 
     <script src="../../config.js"></script>
-    <script src="../../direct-gemini.js"></script>
     <script src="../../license.js"></script>
     <script src="../../content/cau_hinh_cong.js"></script>
     <script src="panel-captcha.js"></script>

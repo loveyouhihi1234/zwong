@@ -76,11 +76,11 @@ const BINARY_ASSETS: ReadonlyArray<{ path: string; url: string }> = [
   { path: 'content/fonts/pdf-italic.ttf', url: pdfItalicUrl },
   { path: 'panels/shared/fonts/roboto-latin-wght-normal.woff2', url: robotoLatinUrl },
   { path: 'panels/shared/fonts/roboto-vietnamese-wght-normal.woff2', url: robotoViUrl },
-  { path: 'thu_vien/charset.json', url: '/thu_vien/charset.json' },
-  { path: 'thu_vien/ort/ort.wasm.min.js', url: '/thu_vien/ort/ort.wasm.min.js' },
-  { path: 'thu_vien/ort/ort-wasm-simd-threaded.mjs', url: '/thu_vien/ort/ort-wasm-simd-threaded.mjs' },
-  { path: 'thu_vien/ddddocr_old.onnx', url: '/thu_vien/ddddocr_old.onnx' },
-  { path: 'thu_vien/ort/ort-wasm-simd-threaded.wasm', url: '/thu_vien/ort/ort-wasm-simd-threaded.wasm' },
+  { path: 'thu_vien/charset.json', url: './thu_vien/charset.json' },
+  { path: 'thu_vien/ort/ort.wasm.min.js', url: './thu_vien/ort/ort.wasm.min.js' },
+  { path: 'thu_vien/ort/ort-wasm-simd-threaded.mjs', url: './thu_vien/ort/ort-wasm-simd-threaded.mjs' },
+  { path: 'thu_vien/ddddocr_old.onnx', url: './thu_vien/ddddocr_old.onnx' },
+  { path: 'thu_vien/ort/ort-wasm-simd-threaded.wasm', url: './thu_vien/ort/ort-wasm-simd-threaded.wasm' },
 ];
 
 export function buildBrowserExtensionFiles(options: {

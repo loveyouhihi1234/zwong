@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+zwong.kt-main/node_modules/
+
+# Build output
+dist/
+zwong.kt-main/dist/
+
+# Environment secrets
+.env
+.env.local
+zwong.kt-main/.env
+zwong.kt-main/.env.local
+
+# Local tooling / OS files
+.playwright-cli/
+.DS_Store
+Thumbs.db
+*.log

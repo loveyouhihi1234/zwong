@@ -67,15 +67,19 @@ export const ExtensionPackagerPanel: React.FC = () => {
         ? `?licenseApiUrl=${encodeURIComponent(licenseApiUrl.trim())}`
         : '';
       let blob: Blob | null = null;
+      const isGithubPages =
+        typeof window !== 'undefined' && window.location.hostname.endsWith('.github.io');
 
-      try {
-        const res = await fetch(`/api/extension/bundle${qs}`);
-        const ct = res.headers.get('content-type') || '';
-        if (res.ok && ct.includes('application/zip')) {
-          blob = await res.blob();
+      if (!isGithubPages) {
+        try {
+          const res = await fetch(`/api/extension/bundle${qs}`);
+          const ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.includes('application/zip')) {
+            blob = await res.blob();
+          }
+        } catch {
+          blob = null;
         }
-      } catch {
-        blob = null;
       }
 
       if (!blob) {

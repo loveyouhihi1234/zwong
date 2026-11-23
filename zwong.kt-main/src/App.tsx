@@ -1,22 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Download, FlaskConical, Globe, Activity, Database, Menu, Users, X } from 'lucide-react';
+import { Download, FlaskConical, Globe, Menu, PanelRight, Users, X } from 'lucide-react';
 import { SandboxPanel } from './components/SandboxPanel';
+import { ExtensionDemoPanel } from './components/ExtensionDemoPanel';
 import { ExtensionPackagerPanel } from './components/ExtensionPackagerPanel';
 import { UsersAdminPanel } from './components/UsersAdminPanel';
 import { PortalsPanel } from './components/PortalsPanel';
-import { LogsPanel, type SolveLogItem } from './components/LogsPanel';
-import {
-  DatasetPanel,
-  type DatasetSampleItem,
-  type DatasetStatsData,
-  type FewShotMode,
-  type LocalModelsStatusData,
-  type MemorySummaryData,
-} from './components/DatasetPanel';
-import type { PortalId } from './utils/captchaLogic';
-import type { PortalLearnedHints } from './utils/portalRules';
 
-type NavTab = 'sandbox' | 'extension' | 'users' | 'portals' | 'dataset' | 'logs';
+type NavTab = 'sandbox' | 'demo' | 'extension' | 'users' | 'portals';
 
 interface HealthState {
   mode: string;
@@ -26,21 +16,12 @@ interface HealthState {
   portalCount: number;
 }
 
-interface StatsState {
-  total: number;
-  successCount: number;
-  errorCount: number;
-  avgLatencyMs: number;
-  logs: SolveLogItem[];
-}
-
 const NAV_ITEMS: { id: NavTab; label: string; title: string; icon: typeof FlaskConical }[] = [
   { id: 'sandbox', label: 'Mô phỏng & Kiểm thử', title: 'Mô phỏng & Kiểm thử Captcha cục bộ', icon: FlaskConical },
+  { id: 'demo', label: 'Extension Demo', title: 'Trải nghiệm trực tiếp Extension Side Panel (3 Tab)', icon: PanelRight },
   { id: 'extension', label: 'Tải & Cài Extension', title: 'Đóng gói & Cài đặt Chrome Extension', icon: Download },
   { id: 'users', label: 'Quản lý User', title: 'Quản lý Người dùng & Google Sheets', icon: Users },
   { id: 'portals', label: '46 Cổng hỗ trợ', title: 'Quy tắc nhận diện 46 Cổng Thuế, BHXH, Hải quan, Ngân hàng & Hóa đơn', icon: Globe },
-  { id: 'dataset', label: 'Kho Dữ liệu', title: 'Kho Dữ liệu & Trí nhớ cục bộ (Bước 1–3)', icon: Database },
-  { id: 'logs', label: 'Nhật ký Giải mã', title: 'Nhật ký giải Captcha cục bộ', icon: Activity },
 ];
 
 export default function App() {
@@ -54,42 +35,12 @@ export default function App() {
     wasmReady: true,
     portalCount: 46,
   });
-  const [stats, setStats] = useState<StatsState>({
-    total: 0,
-    successCount: 0,
-    errorCount: 0,
-    avgLatencyMs: 0,
-    logs: [],
-  });
-  const [logsLoading, setLogsLoading] = useState<boolean>(false);
-  const [datasetLoading, setDatasetLoading] = useState<boolean>(false);
-  const [consolidatingMemory, setConsolidatingMemory] = useState<boolean>(false);
-  const [memorySummary, setMemorySummary] = useState<MemorySummaryData | null>(null);
-  const [localModels, setLocalModels] = useState<LocalModelsStatusData | null>(null);
-  const [datasetData, setDatasetData] = useState<{
-    stats: DatasetStatsData;
-    samples: DatasetSampleItem[];
-    portalHints?: Record<PortalId, PortalLearnedHints>;
-  }>({
-    stats: {
-      total: 0,
-      usable: 0,
-      verified: 0,
-      corrected: 0,
-      rejected: 0,
-      pending: 0,
-      accuracyPercent: null,
-      byPortal: [
-        { portal: 'hddt', total: 0, usable: 0, verified: 0, corrected: 0, rejected: 0, pending: 0, accuracyPercent: null },
-        { portal: 'tdt', total: 0, usable: 0, verified: 0, corrected: 0, rejected: 0, pending: 0, accuracyPercent: null },
-        { portal: 'dvc', total: 0, usable: 0, verified: 0, corrected: 0, rejected: 0, pending: 0, accuracyPercent: null },
-        { portal: 'tracuunnt', total: 0, usable: 0, verified: 0, corrected: 0, rejected: 0, pending: 0, accuracyPercent: null },
-      ],
-    },
-    samples: [],
-  });
 
   const loadHealth = useCallback(async () => {
+    if (typeof window !== 'undefined' && window.location.hostname.endsWith('.github.io')) {
+      setStaticHosting(true);
+      return;
+    }
     try {
       const res = await fetch('/api/health');
       const ct = res.headers.get('content-type') || '';
@@ -111,108 +62,15 @@ export default function App() {
     }
   }, []);
 
-  const loadStats = useCallback(async () => {
-    setLogsLoading(true);
-    try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
-      if (res.ok) {
-        setStats({
-          total: data.total || 0,
-          successCount: data.successCount || 0,
-          errorCount: data.errorCount || 0,
-          avgLatencyMs: data.avgLatencyMs || 0,
-          logs: Array.isArray(data.logs) ? data.logs : [],
-        });
-      }
-    } catch {
-      // Ignore network hiccup
-    } finally {
-      setLogsLoading(false);
-    }
-  }, []);
-
-  const loadMemory = useCallback(async () => {
-    try {
-      const res = await fetch('/api/memory');
-      const data = await res.json();
-      if (res.ok && data?.ok) {
-        setMemorySummary(data.memory || null);
-        setLocalModels(data.localModels || null);
-      }
-    } catch {
-      // Ignore network hiccup
-    }
-  }, []);
-
-  const loadDataset = useCallback(async () => {
-    setDatasetLoading(true);
-    try {
-      const [dsRes] = await Promise.all([fetch('/api/dataset'), loadMemory()]);
-      const data = await dsRes.json();
-      if (dsRes.ok && data?.stats) {
-        setDatasetData({
-          stats: data.stats,
-          samples: Array.isArray(data.samples) ? data.samples : [],
-          portalHints: data.portalHints,
-        });
-      }
-    } catch {
-      // Ignore network hiccup
-    } finally {
-      setDatasetLoading(false);
-    }
-  }, [loadMemory]);
-
   useEffect(() => {
     loadHealth();
-    loadStats();
-    loadDataset();
-  }, [loadHealth, loadStats, loadDataset]);
-
-  const handleClearLogs = async () => {
-    await fetch('/api/stats', { method: 'DELETE' }).catch(() => {});
-    loadStats();
-  };
-
-  const handleClearDataset = async () => {
-    await fetch('/api/dataset', { method: 'DELETE' }).catch(() => {});
-    loadDataset();
-  };
-
-  const handleConsolidateMemory = async () => {
-    setConsolidatingMemory(true);
-    try {
-      const res = await fetch('/api/memory/consolidate', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok && data?.ok) {
-        setMemorySummary(data.memory || null);
-        setLocalModels(data.localModels || null);
-      }
-    } finally {
-      setConsolidatingMemory(false);
-    }
-  };
-
-  const handleChangeFewShotMode = async (fewShotMode: FewShotMode) => {
-    const res = await fetch('/api/memory/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fewShotMode }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data?.ok) {
-      setMemorySummary(data.memory || null);
-    }
-  };
+  }, [loadHealth]);
 
   const currentNav = NAV_ITEMS.find((n) => n.id === activeTab) || NAV_ITEMS[0];
 
   const handleSelectTab = (tab: NavTab) => {
     setActiveTab(tab);
     setMobileMenuOpen(false);
-    if (tab === 'logs') loadStats();
-    if (tab === 'dataset') loadDataset();
   };
 
   const solverReady = health.onnxReady && health.wasmReady;
@@ -351,48 +209,14 @@ export default function App() {
 
         <main className="flex-1 p-4 sm:p-6 max-w-6xl w-full mx-auto">
           {activeTab === 'sandbox' && (
-            <SandboxPanel
-              onnxReady={health.onnxReady}
-              wasmReady={health.wasmReady}
-              onSolved={() => {
-                loadStats();
-                loadDataset();
-              }}
-            />
+            <SandboxPanel onnxReady={health.onnxReady} wasmReady={health.wasmReady} />
+          )}
+          {activeTab === 'demo' && (
+            <ExtensionDemoPanel onGoToPackager={() => handleSelectTab('extension')} />
           )}
           {activeTab === 'extension' && <ExtensionPackagerPanel />}
           {activeTab === 'users' && <UsersAdminPanel />}
           {activeTab === 'portals' && <PortalsPanel />}
-          {activeTab === 'dataset' && (
-            <DatasetPanel
-              stats={datasetData.stats}
-              samples={datasetData.samples}
-              portalHints={datasetData.portalHints}
-              memorySummary={memorySummary}
-              localModels={localModels}
-              consolidating={consolidatingMemory}
-              loading={datasetLoading}
-              onRefresh={loadDataset}
-              onClear={handleClearDataset}
-              onLabelUpdated={loadDataset}
-              onConsolidateMemory={handleConsolidateMemory}
-              onChangeFewShotMode={handleChangeFewShotMode}
-              onGoToSandbox={() => handleSelectTab('sandbox')}
-            />
-          )}
-          {activeTab === 'logs' && (
-            <LogsPanel
-              total={stats.total}
-              successCount={stats.successCount}
-              errorCount={stats.errorCount}
-              avgLatencyMs={stats.avgLatencyMs}
-              logs={stats.logs}
-              loading={logsLoading}
-              onRefresh={loadStats}
-              onClear={handleClearLogs}
-              onGoToSandbox={() => handleSelectTab('sandbox')}
-            />
-          )}
         </main>
       </div>
     </div>

@@ -1,12 +1,28 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
+import {defineConfig, type Plugin} from 'vite';
+import {emitStaticPagesAssets} from './server/staticPagesAssets';
+
+function taxcapStaticPagesAssetsPlugin(): Plugin {
+  let outDir = 'dist';
+  return {
+    name: 'taxcap-static-pages-assets',
+    apply: 'build',
+    configResolved(config) {
+      outDir = config.build.outDir || 'dist';
+    },
+    async closeBundle() {
+      const resolvedOutDir = path.resolve(__dirname, outDir);
+      await emitStaticPagesAssets(__dirname, resolvedOutDir);
+    },
+  };
+}
 
 export default defineConfig(() => {
   return {
     base: './',
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), taxcapStaticPagesAssetsPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

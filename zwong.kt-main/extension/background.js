@@ -2,16 +2,11 @@ importScripts("config.js", "direct-gemini.js", "license.js");
 
 const SETTINGS_KEY = "taxcapSettings";
 const STATS_KEY = "taxcapStats";
-const MEMORY_KEY = "taxcapMemory";
-const SAMPLES_KEY = "taxcapSamples";
-const LOGS_KEY = "taxcapLogs";
 const LICENSE_KEY = "taxcapLicense";
 const DEVICE_ID_KEY = "taxcapDeviceId";
-const PENDING_SOLVES_KEY = "taxcapPendingSolves";
 const PAUSE_ALARM = "taxcap-resume";
 const OFFSCREEN_URL = "offscreen.html";
 
-const pendingMemoryMap = new Map();
 let inFlightLicenseSync = null;
 let creatingOffscreen = null;
 
@@ -280,97 +275,10 @@ async function bumpStats(ok) {
   await chrome.storage.local.set({ [STATS_KEY]: prev });
 }
 
-async function loadLocalMemory() {
-  const res = await chrome.storage.local.get(MEMORY_KEY);
-  return self.TaxCapDirect.normalizeMemoryState(res[MEMORY_KEY]);
-}
-
-async function saveLocalMemory(nextState) {
-  await chrome.storage.local.set({ [MEMORY_KEY]: nextState });
-}
-
-async function loadSamples() {
-  const res = await chrome.storage.local.get(SAMPLES_KEY);
-  return Array.isArray(res[SAMPLES_KEY]) ? res[SAMPLES_KEY] : [];
-}
-
-async function saveSamples(samples) {
-  await chrome.storage.local.set({ [SAMPLES_KEY]: samples });
-}
-
-async function appendSampleRecord(entry) {
-  const prev = await loadSamples();
-  const next = self.TaxCapDirect.recordSampleInDataset(prev, entry);
-  await saveSamples(next);
-}
-
-async function loadLogs() {
-  const res = await chrome.storage.local.get(LOGS_KEY);
-  return Array.isArray(res[LOGS_KEY]) ? res[LOGS_KEY] : [];
-}
-
-async function pushSolveLog(params) {
-  const prev = await loadLogs();
-  const entry = self.TaxCapDirect.createLogEntry(params);
-  const next = self.TaxCapDirect.appendSolveLog(prev, entry);
-  await chrome.storage.local.set({ [LOGS_KEY]: next });
-}
-
-function summarizeMemory(state) {
-  const exactCount = Object.keys(state?.exactHashes || {}).length;
-  const learnedCount = Number(state?.stats?.learnedCount) || 0;
-  const correctedCount = Number(state?.stats?.correctedCount) || 0;
-  return { exactCount, learnedCount, correctedCount };
-}
-
-async function savePendingSolve(sampleId, record) {
-  pendingMemoryMap.set(sampleId, record);
-  if (pendingMemoryMap.size > 20) {
-    const oldest = pendingMemoryMap.keys().next().value;
-    if (oldest) pendingMemoryMap.delete(oldest);
-  }
-  try {
-    if (chrome.storage.session) {
-      const res = await chrome.storage.session.get(PENDING_SOLVES_KEY);
-      const list = Array.isArray(res[PENDING_SOLVES_KEY]) ? res[PENDING_SOLVES_KEY] : [];
-      const next = [{ sampleId, ...record }, ...list.filter((x) => x.sampleId !== sampleId)].slice(0, 12);
-      await chrome.storage.session.set({ [PENDING_SOLVES_KEY]: next });
-    }
-  } catch {
-    // ignore
-  }
-}
-
-async function takePendingSolve(sampleId) {
-  const mem = pendingMemoryMap.get(sampleId);
-  if (mem) {
-    pendingMemoryMap.delete(sampleId);
-    return mem;
-  }
-  try {
-    if (chrome.storage.session) {
-      const res = await chrome.storage.session.get(PENDING_SOLVES_KEY);
-      const list = Array.isArray(res[PENDING_SOLVES_KEY]) ? res[PENDING_SOLVES_KEY] : [];
-      const found = list.find((x) => x.sampleId === sampleId);
-      if (found) {
-        await chrome.storage.session.set({
-          [PENDING_SOLVES_KEY]: list.filter((x) => x.sampleId !== sampleId),
-        });
-        return found;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
 async function handleSolveOnnx(msg) {
   const started = Date.now();
   const portal = self.TaxCapDirect.normalizePortalId(msg?.portal || msg?.cong || "hddt");
   const cong = String(msg?.cong || portal);
-  const bypassCache = Boolean(msg?.bypassCache);
-  const thumbnail = typeof msg?.image === "string" ? msg.image : "";
 
   const gate = await ensureLicenseUnlocked();
   if (!gate.ok) {
@@ -386,73 +294,14 @@ async function handleSolveOnnx(msg) {
   const h = Number(msg?.h) || 0;
   if (!Array.isArray(rgba) || w <= 0 || h <= 0 || rgba.length !== w * h * 4) {
     await bumpStats(false);
-    await pushSolveLog({
-      portal,
-      status: "error",
-      latencyMs: Date.now() - started,
-      message: "Dữ liệu pixel ảnh captcha không hợp lệ",
-    });
     return { ok: false, message: "Không đọc được ảnh captcha" };
-  }
-
-  const parsedThumb = self.TaxCapDirect.parseImageDataUrl(thumbnail);
-  const imageHash =
-    String(msg?.sig || "") ||
-    (parsedThumb ? self.TaxCapDirect.hashBase64Quick(`${parsedThumb.mimeType}:${parsedThumb.data}`) : "");
-
-  // Kiểm tra trí nhớ cục bộ trước (nếu người dùng đã xác nhận/sửa ảnh giống hệt)
-  if (!bypassCache && imageHash) {
-    const memoryState = await loadLocalMemory();
-    const cachedLabel = self.TaxCapDirect.getExactMemoryMatch(memoryState, portal, imageHash);
-    if (cachedLabel) {
-      const sampleId = `local:${crypto.randomUUID()}`;
-      const latencyMs = Math.max(1, Date.now() - started);
-      await savePendingSolve(sampleId, {
-        portal,
-        predicted: cachedLabel,
-        imageHash,
-      });
-      await appendSampleRecord({
-        sampleId,
-        portal,
-        source: "memory-local",
-        predicted: cachedLabel,
-        latencyMs,
-        imageDataUrl: thumbnail,
-        imageHash,
-      });
-      await pushSolveLog({
-        portal,
-        status: "ok",
-        code: cachedLabel,
-        latencyMs,
-        message: "Trí nhớ cục bộ (<5ms)",
-      });
-      await recordLicensedSolve();
-      await bumpStats(true);
-      await updateBadge(false);
-      return {
-        ok: true,
-        captcha: cachedLabel,
-        sampleId,
-        source: "memory-local",
-        latencyMs,
-      };
-    }
   }
 
   try {
     await ensureOffscreenDocument();
-  } catch (err) {
-    const latencyMs = Date.now() - started;
+  } catch {
     await bumpStats(false);
     await updateBadge(true);
-    await pushSolveLog({
-      portal,
-      status: "error",
-      latencyMs,
-      message: err?.message || "Không khởi tạo được Offscreen ONNX",
-    });
     return { ok: false, message: "Không khởi tạo được bộ giải ONNX cục bộ" };
   }
 
@@ -470,12 +319,6 @@ async function handleSolveOnnx(msg) {
   if (!offRes?.ok || !captcha) {
     await bumpStats(false);
     await updateBadge(false);
-    await pushSolveLog({
-      portal,
-      status: "error",
-      latencyMs,
-      message: offRes?.loi ? `ONNX cục bộ: ${offRes.loi}` : "ONNX cục bộ chưa đọc được mã",
-    });
     return {
       ok: false,
       message: "Không đọc được, bấm thử lại",
@@ -483,28 +326,6 @@ async function handleSolveOnnx(msg) {
     };
   }
 
-  const sampleId = `local:${crypto.randomUUID()}`;
-  await savePendingSolve(sampleId, {
-    portal,
-    predicted: captcha,
-    imageHash,
-  });
-  await appendSampleRecord({
-    sampleId,
-    portal,
-    source: "onnx-local",
-    predicted: captcha,
-    latencyMs,
-    imageDataUrl: thumbnail,
-    imageHash,
-  });
-  await pushSolveLog({
-    portal,
-    status: "ok",
-    code: captcha,
-    latencyMs,
-    message: `ONNX cục bộ (ddddocr · ${latencyMs}ms)`,
-  });
   await recordLicensedSolve();
   await bumpStats(true);
   await updateBadge(false);
@@ -512,7 +333,6 @@ async function handleSolveOnnx(msg) {
   return {
     ok: true,
     captcha,
-    sampleId,
     source: "onnx-local",
     latencyMs,
   };
@@ -536,6 +356,8 @@ chrome.runtime.onInstalled.addListener(async () => {
     };
     await chrome.storage.local.set({ [SETTINGS_KEY]: nextSettings });
   }
+  // Dọn các khóa lưu kho dữ liệu / nhật ký / trí nhớ cũ nếu có từ phiên bản trước
+  await chrome.storage.local.remove(["taxcapMemory", "taxcapSamples", "taxcapLogs"]).catch(() => {});
   await updateBadge(false);
 });
 
@@ -677,194 +499,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       await recordLicensedSolve();
       await bumpStats(true);
       await updateBadge(false);
-      const parsed = self.TaxCapDirect.parseImageDataUrl(msg.image || "");
-      const portal = self.TaxCapDirect.normalizePortalId(msg.portal || "hddt");
-      const latencyMs = Math.max(1, Math.round(Number(msg.latencyMs) || 2));
-      const confidence = Math.max(0, Math.min(100, Math.round(Number(msg.confidence) || 95)));
-      const source = String(msg.source || "svg-local");
-
-      const sourceLabel =
-        source === "svg-sig"
-          ? `SVG chữ ký nội bộ (${confidence}%)`
-          : source === "text-local"
-            ? "Đọc văn bản trực tiếp (DOM)"
-            : source === "svg-text"
-              ? "Đọc chữ SVG trực tiếp"
-              : `SVG nội bộ (${confidence}%)`;
-
-      await pushSolveLog({
-        portal,
-        status: "ok",
-        code: msg.captcha || "",
-        latencyMs,
-        message: sourceLabel,
-      });
-
-      const imageHash = parsed
-        ? self.TaxCapDirect.hashBase64Quick(`${parsed.mimeType}:${parsed.data}`)
-        : "";
-      const sampleId = `local:${crypto.randomUUID()}`;
-      if (parsed) {
-        await savePendingSolve(sampleId, {
-          portal,
-          predicted: msg.captcha || "",
-          imageHash,
-        });
-      }
-      await appendSampleRecord({
-        sampleId,
-        portal,
-        source,
-        predicted: msg.captcha || "",
-        latencyMs,
-        imageDataUrl: msg.image || "",
-        imageHash,
-      });
-      sendResponse({ ok: true, sampleId, localOnly: true });
+      sendResponse({ ok: true, localOnly: true });
     })();
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_FEEDBACK") {
-    (async () => {
-      const sampleId = String(msg.sampleId || "");
-      const outcome = msg.outcome;
-      if (!sampleId || !outcome) {
-        sendResponse({ ok: false });
-        return;
-      }
-
-      const prevSamples = await loadSamples();
-      const { samples: nextSamples, updatedSample } = self.TaxCapDirect.applySampleFeedback(prevSamples, {
-        sampleId,
-        outcome,
-        finalLabel: msg.finalLabel || "",
-      });
-      if (updatedSample) {
-        await saveSamples(nextSamples);
-      }
-
-      const pending = await takePendingSolve(sampleId);
-      const sourceMeta =
-        pending ||
-        (updatedSample
-          ? {
-              portal: updatedSample.portal,
-              predicted: updatedSample.predicted,
-              imageHash: updatedSample.imageHash,
-            }
-          : null);
-
-      if (!sourceMeta) {
-        sendResponse({ ok: Boolean(updatedSample) });
-        return;
-      }
-      const prevMem = await loadLocalMemory();
-      const nextMem = self.TaxCapDirect.updateLocalLearningState(prevMem, {
-        portal: sourceMeta.portal,
-        predicted: sourceMeta.predicted,
-        finalLabel: msg.finalLabel || "",
-        outcome,
-        imageHash: sourceMeta.imageHash,
-      });
-      await saveLocalMemory(nextMem);
-      sendResponse({ ok: true, localLearned: true });
-    })();
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_GET_DATASET") {
-    Promise.all([loadSamples(), loadLocalMemory()])
-      .then(([samples, mem]) => {
-        const summary = self.TaxCapDirect.computeDatasetSummary(samples);
-        const portalHints = {};
-        for (const id of self.TaxCapDirect.PORTAL_IDS) {
-          portalHints[id] = self.TaxCapDirect.getAdaptiveHints(mem, id);
-        }
-        sendResponse({
-          ok: true,
-          summary,
-          samples,
-          portalHints,
-          memoryStats: summarizeMemory(mem),
-        });
-      })
-      .catch(() => sendResponse({ ok: false }));
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_POPUP_UPDATE_SAMPLE") {
-    (async () => {
-      const sampleId = String(msg.sampleId || "");
-      const cleaned = self.TaxCapDirect.sanitizeCaptchaText(String(msg.finalLabel || ""));
-      if (!sampleId || cleaned.length < 2) {
-        sendResponse({ ok: false });
-        return;
-      }
-      const prevSamples = await loadSamples();
-      const target = prevSamples.find((s) => s.sampleId === sampleId);
-      if (!target) {
-        sendResponse({ ok: false });
-        return;
-      }
-      const outcome = cleaned === target.predicted ? "verified" : "corrected";
-      const { samples: nextSamples, updatedSample } = self.TaxCapDirect.applySampleFeedback(prevSamples, {
-        sampleId,
-        outcome,
-        finalLabel: cleaned,
-      });
-      await saveSamples(nextSamples);
-
-      const prevMem = await loadLocalMemory();
-      const nextMem = self.TaxCapDirect.updateLocalLearningState(prevMem, {
-        portal: target.portal,
-        predicted: target.predicted,
-        finalLabel: cleaned,
-        outcome,
-        imageHash: target.imageHash,
-      });
-      await saveLocalMemory(nextMem);
-      sendResponse({ ok: true, sample: updatedSample });
-    })();
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_CLEAR_DATASET") {
-    Promise.all([saveSamples([]), saveLocalMemory(self.TaxCapDirect.createEmptyMemoryState())])
-      .then(() => sendResponse({ ok: true }))
-      .catch(() => sendResponse({ ok: false }));
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_GET_LOGS") {
-    loadLogs()
-      .then((logs) => {
-        const stats = self.TaxCapDirect.computeLogStats(logs);
-        sendResponse({ ok: true, stats, logs });
-      })
-      .catch(() => sendResponse({ ok: false }));
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_CLEAR_LOGS") {
-    chrome.storage.local
-      .set({ [LOGS_KEY]: [] })
-      .then(() => sendResponse({ ok: true }))
-      .catch(() => sendResponse({ ok: false }));
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_GET_MEMORY_STATS") {
-    loadLocalMemory()
-      .then((mem) => sendResponse({ ok: true, ...summarizeMemory(mem) }))
-      .catch(() => sendResponse({ ok: true, exactCount: 0, learnedCount: 0, correctedCount: 0 }));
-    return true;
-  }
-
-  if (msg.type === "TAXCAP_CLEAR_MEMORY") {
-    saveLocalMemory(self.TaxCapDirect.createEmptyMemoryState())
-      .then(() => sendResponse({ ok: true }))
-      .catch(() => sendResponse({ ok: false }));
     return true;
   }
 

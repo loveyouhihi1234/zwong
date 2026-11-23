@@ -1,13 +1,11 @@
 const SETTINGS_KEY = "taxcapSettings";
 const STATS_KEY = "taxcapStats";
-const MAIN_PORTAL_IDS = new Set(["hddt", "tdt", "dvc", "tracuunnt"]);
+const LICENSE_KEY = "taxcapLicense";
 
 const tabButtons = Array.from(document.querySelectorAll(".tab-btn"));
 const panels = {
   captcha: document.getElementById("panel-captcha"),
   config: document.getElementById("panel-config"),
-  dataset: document.getElementById("panel-dataset"),
-  logs: document.getElementById("panel-logs"),
 };
 
 const enabledToggleWrap = document.getElementById("enabledToggleWrap");
@@ -55,53 +53,10 @@ const configPortalCount = document.getElementById("configPortalCount");
 
 const pingBtn = document.getElementById("pingBtn");
 const pingStatus = document.getElementById("pingStatus");
-const memoryStatsText = document.getElementById("memoryStatsText");
-const clearMemoryBtn = document.getElementById("clearMemoryBtn");
-
-const dsTotal = document.getElementById("dsTotal");
-const dsUsable = document.getElementById("dsUsable");
-const dsAccuracy = document.getElementById("dsAccuracy");
-const dsPending = document.getElementById("dsPending");
-const dsPortalsGrid = document.getElementById("dsPortalsGrid");
-const dsPortalFilter = document.getElementById("dsPortalFilter");
-const dsRefreshBtn = document.getElementById("dsRefreshBtn");
-const dsExportBtn = document.getElementById("dsExportBtn");
-const dsClearBtn = document.getElementById("dsClearBtn");
-const dsSampleList = document.getElementById("dsSampleList");
-
-const logTotal = document.getElementById("logTotal");
-const logOk = document.getElementById("logOk");
-const logErr = document.getElementById("logErr");
-const logLatency = document.getElementById("logLatency");
-const logPortalFilter = document.getElementById("logPortalFilter");
-const logStatusPills = Array.from(document.querySelectorAll("#logStatusPills .pill-btn"));
-const logRefreshBtn = document.getElementById("logRefreshBtn");
-const logClearBtn = document.getElementById("logClearBtn");
-const logTableWrap = document.getElementById("logTableWrap");
 
 let currentSettings = null;
 let activeTab = "captcha";
 let licenseUnlocked = false;
-let cachedSamples = [];
-let cachedLogs = [];
-let editingSampleId = null;
-let logStatusFilter = "all";
-
-const PORTAL_NAMES = {
-  hddt: "HĐĐT",
-  tdt: "Thuế ĐT",
-  dvc: "DVC Thuế",
-  tracuunnt: "Tra cứu NNT",
-  extended: "Cổng mở rộng",
-};
-
-if (Array.isArray(window.CONG_THUE)) {
-  for (const c of window.CONG_THUE) {
-    if (!c.portalId && c.cong && !PORTAL_NAMES[c.cong]) {
-      PORTAL_NAMES[c.cong] = c.ten || c.hostname;
-    }
-  }
-}
 
 function renderExtendedPortalsCatalog() {
   const all = Array.isArray(window.CONG_THUE) ? window.CONG_THUE : [];
@@ -146,19 +101,17 @@ function renderExtendedPortalsCatalog() {
 
 function switchTab(nextTab) {
   if (!licenseUnlocked) return;
-  activeTab = nextTab;
+  const resolved = panels[nextTab] ? nextTab : "captcha";
+  activeTab = resolved;
   panelActivate.classList.add("hidden");
   for (const btn of tabButtons) {
-    const isMatch = btn.dataset.tab === nextTab;
+    const isMatch = btn.dataset.tab === resolved;
     btn.classList.toggle("active", isMatch);
     btn.setAttribute("aria-selected", isMatch ? "true" : "false");
   }
   for (const [id, el] of Object.entries(panels)) {
-    el.classList.toggle("hidden", id !== nextTab);
+    el.classList.toggle("hidden", id !== resolved);
   }
-  if (nextTab === "dataset") loadDatasetTab();
-  if (nextTab === "logs") loadLogsTab();
-  if (nextTab === "config") loadMemoryStats();
 }
 
 for (const btn of tabButtons) {
@@ -187,20 +140,6 @@ async function readSettingsDirect() {
     };
   }
   return currentSettings;
-}
-
-async function loadMemoryStats() {
-  try {
-    const mem = await chrome.runtime.sendMessage({ type: "TAXCAP_GET_MEMORY_STATS" });
-    if (mem?.ok) {
-      const learned = mem.learnedCount || 0;
-      const exact = mem.exactCount || 0;
-      memoryStatsText.textContent = `Trí nhớ cục bộ: ${learned} mẫu học · ${exact} ảnh nhớ`;
-      clearMemoryBtn.classList.toggle("hidden", learned === 0 && exact === 0);
-    }
-  } catch {
-    // ignore
-  }
 }
 
 function renderLicenseUi(licStatus) {
@@ -292,6 +231,19 @@ async function loadLicenseStatus() {
   });
 }
 
+async function refreshDailyStats() {
+  const today = new Date().toISOString().slice(0, 10);
+  const statsRes = await chrome.storage.local.get(STATS_KEY);
+  const stats = statsRes[STATS_KEY];
+  if (stats && stats.date === today) {
+    statSolved.textContent = String(stats.solved || 0);
+    statFailed.textContent = String(stats.failed || 0);
+  } else {
+    statSolved.textContent = "0";
+    statFailed.textContent = "0";
+  }
+}
+
 async function loadState() {
   renderExtendedPortalsCatalog();
   await readSettingsDirect();
@@ -311,15 +263,7 @@ async function loadState() {
     pauseStatus.textContent = "";
   }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const statsRes = await chrome.storage.local.get(STATS_KEY);
-  const stats = statsRes[STATS_KEY];
-  if (stats && stats.date === today) {
-    statSolved.textContent = String(stats.solved || 0);
-    statFailed.textContent = String(stats.failed || 0);
-  }
-
-  await loadMemoryStats();
+  await refreshDailyStats();
   await loadLicenseStatus();
 }
 
@@ -355,17 +299,6 @@ resumeBtn.addEventListener("click", () => {
   saveSettings({ enabled: true, pausedUntil: 0 });
 });
 
-clearMemoryBtn.addEventListener("click", async () => {
-  try {
-    await chrome.runtime.sendMessage({ type: "TAXCAP_CLEAR_MEMORY" });
-    await loadMemoryStats();
-    pingStatus.className = "status ok";
-    pingStatus.textContent = "Đã xóa trí nhớ cục bộ.";
-  } catch {
-    // ignore
-  }
-});
-
 pingBtn.addEventListener("click", async () => {
   pingBtn.disabled = true;
   pingStatus.className = "status";
@@ -392,300 +325,6 @@ pingBtn.addEventListener("click", async () => {
     pingStatus.className = "status err";
     pingStatus.textContent = res.message || "Không nạp được mô hình ONNX cục bộ.";
   }
-});
-
-// --- TAB 3: KHO DỮ LIỆU ---
-function matchesPortalFilter(portal, filter) {
-  if (filter === "all") return true;
-  if (filter === "extended") return !MAIN_PORTAL_IDS.has(portal);
-  return portal === filter;
-}
-
-function renderPortalCards(byPortal, portalHints) {
-  dsPortalsGrid.innerHTML = "";
-  for (const item of byPortal || []) {
-    const pct = Math.min(100, Math.round((item.usable / 500) * 100));
-    const card = document.createElement("div");
-    card.className = "portal-card";
-
-    const head = document.createElement("div");
-    head.className = "portal-head";
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = item.shortName || PORTAL_NAMES[item.portal] || item.portal;
-    const countSpan = document.createElement("span");
-    countSpan.className = "mono";
-    countSpan.textContent = `${item.usable}/500`;
-    head.append(nameSpan, countSpan);
-
-    const track = document.createElement("div");
-    track.className = "progress-track";
-    const fill = document.createElement("div");
-    fill.className = "progress-fill";
-    fill.style.width = `${pct}%`;
-    track.appendChild(fill);
-
-    const meta = document.createElement("div");
-    meta.className = "portal-meta";
-    const totalSpan = document.createElement("span");
-    totalSpan.textContent = `Ảnh: ${item.total}`;
-    const accSpan = document.createElement("span");
-    accSpan.textContent = `Đúng: ${item.accuracyPercent === null ? "—" : `${item.accuracyPercent}%`}`;
-    meta.append(totalSpan, accSpan);
-
-    card.append(head, track, meta);
-
-    const hints = portalHints?.[item.portal];
-    if (hints?.confusions?.length) {
-      const conf = document.createElement("div");
-      conf.className = "portal-confusion";
-      conf.textContent = hints.confusions
-        .slice(0, 2)
-        .map((c) => `${c.from}→${c.to}(${c.count}x)`)
-        .join(" ");
-      card.appendChild(conf);
-    }
-
-    dsPortalsGrid.appendChild(card);
-  }
-}
-
-function renderSampleList() {
-  const filter = dsPortalFilter.value;
-  const items = cachedSamples.filter((s) => matchesPortalFilter(s.portal, filter));
-  dsSampleList.innerHTML = "";
-
-  if (!items.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-box";
-    empty.textContent = "Chưa có mẫu captcha nào. Mở cổng Thuế/Hóa đơn để Extension tự ghi nhận mẫu tại đây.";
-    dsSampleList.appendChild(empty);
-    return;
-  }
-
-  for (const sample of items.slice(0, 30)) {
-    const row = document.createElement("div");
-    row.className = "sample-item";
-
-    if (sample.imageDataUrl) {
-      const img = document.createElement("img");
-      img.className = "sample-thumb";
-      img.src = sample.imageDataUrl;
-      img.alt = "Captcha";
-      row.appendChild(img);
-    } else {
-      const emptyImg = document.createElement("div");
-      emptyImg.className = "sample-thumb-empty";
-      emptyImg.textContent = "Không ảnh";
-      row.appendChild(emptyImg);
-    }
-
-    const body = document.createElement("div");
-    body.className = "sample-body";
-
-    const topLine = document.createElement("div");
-    topLine.style.display = "flex";
-    topLine.style.alignItems = "center";
-    topLine.style.gap = "6px";
-
-    const codeSpan = document.createElement("span");
-    codeSpan.className = "sample-code";
-    codeSpan.textContent = sample.finalLabel || sample.predicted || "—";
-    topLine.appendChild(codeSpan);
-
-    const badge = document.createElement("span");
-    badge.className = `badge ${sample.outcome || "pending"}`;
-    badge.textContent =
-      sample.outcome === "verified"
-        ? "Đúng"
-        : sample.outcome === "corrected"
-          ? "Đã sửa"
-          : sample.outcome === "rejected"
-            ? "Bỏ"
-            : "Chờ nhãn";
-    topLine.appendChild(badge);
-
-    const subLine = document.createElement("div");
-    subLine.className = "sample-sub";
-    const timeStr = sample.timestamp ? new Date(sample.timestamp).toLocaleTimeString("vi-VN") : "";
-    const predNote =
-      sample.outcome === "corrected" && sample.predicted ? ` · Gốc: ${sample.predicted}` : "";
-    subLine.textContent = `${PORTAL_NAMES[sample.portal] || sample.portal} · ${sample.source || "onnx-local"} · ${sample.latencyMs}ms · ${timeStr}${predNote}`;
-
-    body.append(topLine, subLine);
-    row.appendChild(body);
-
-    if (editingSampleId === sample.sampleId) {
-      const input = document.createElement("input");
-      input.type = "text";
-      input.className = "edit-input";
-      input.value = sample.finalLabel || sample.predicted || "";
-
-      const saveEditBtn = document.createElement("button");
-      saveEditBtn.type = "button";
-      saveEditBtn.className = "primary sm";
-      saveEditBtn.textContent = "Lưu";
-      saveEditBtn.addEventListener("click", async () => {
-        const val = input.value.trim();
-        if (val.length < 2) return;
-        await chrome.runtime.sendMessage({
-          type: "TAXCAP_POPUP_UPDATE_SAMPLE",
-          sampleId: sample.sampleId,
-          finalLabel: val,
-        });
-        editingSampleId = null;
-        await loadDatasetTab();
-      });
-      row.append(input, saveEditBtn);
-    } else {
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "sm";
-      editBtn.textContent = "Sửa";
-      editBtn.addEventListener("click", () => {
-        editingSampleId = sample.sampleId;
-        renderSampleList();
-      });
-      row.appendChild(editBtn);
-    }
-
-    dsSampleList.appendChild(row);
-  }
-}
-
-async function loadDatasetTab() {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: "TAXCAP_GET_DATASET" });
-    if (!res?.ok) return;
-    const s = res.summary || {};
-    dsTotal.textContent = String(s.total || 0);
-    dsUsable.textContent = String(s.usable || 0);
-    dsAccuracy.textContent = s.accuracyPercent === null || s.accuracyPercent === undefined ? "—" : `${s.accuracyPercent}%`;
-    dsPending.textContent = String((s.pending || 0) + (s.rejected || 0));
-    cachedSamples = Array.isArray(res.samples) ? res.samples : [];
-    renderPortalCards(s.byPortal, res.portalHints);
-    renderSampleList();
-  } catch {
-    // ignore
-  }
-}
-
-dsPortalFilter.addEventListener("change", renderSampleList);
-dsRefreshBtn.addEventListener("click", loadDatasetTab);
-dsExportBtn.addEventListener("click", () => {
-  const payload = JSON.stringify({ exportedAt: new Date().toISOString(), samples: cachedSamples }, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `taxcap-dataset-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
-dsClearBtn.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "TAXCAP_CLEAR_DATASET" });
-  editingSampleId = null;
-  await loadDatasetTab();
-  await loadMemoryStats();
-});
-
-// --- TAB 4: NHẬT KÝ ---
-function renderLogsTable() {
-  const portalFilter = logPortalFilter.value;
-  const rows = cachedLogs.filter((item) => {
-    if (!matchesPortalFilter(item.portal, portalFilter)) return false;
-    if (logStatusFilter !== "all" && item.status !== logStatusFilter) return false;
-    return true;
-  });
-
-  logTableWrap.innerHTML = "";
-  if (!rows.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty-box";
-    empty.textContent = "Chưa có lượt giải captcha nào được ghi nhận.";
-    logTableWrap.appendChild(empty);
-    return;
-  }
-
-  const table = document.createElement("table");
-  table.className = "log-table";
-  table.innerHTML = `
-    <thead>
-      <tr>
-        <th>Giờ</th>
-        <th>Cổng</th>
-        <th>TT</th>
-        <th>Mã</th>
-        <th>Trễ</th>
-        <th>Chi tiết</th>
-      </tr>
-    </thead>
-  `;
-  const tbody = document.createElement("tbody");
-
-  for (const item of rows.slice(0, 50)) {
-    const tr = document.createElement("tr");
-
-    const tdTime = document.createElement("td");
-    tdTime.className = "mono";
-    tdTime.textContent = item.timestamp ? new Date(item.timestamp).toLocaleTimeString("vi-VN") : "";
-
-    const tdPortal = document.createElement("td");
-    tdPortal.textContent = PORTAL_NAMES[item.portal] || item.portal;
-
-    const tdStatus = document.createElement("td");
-    tdStatus.style.fontWeight = "600";
-    tdStatus.style.color = item.status === "ok" ? "#15803d" : "#b91c1c";
-    tdStatus.textContent = item.status === "ok" ? "OK" : "Lỗi";
-
-    const tdCode = document.createElement("td");
-    tdCode.className = "mono";
-    tdCode.textContent = item.codeMasked || "—";
-
-    const tdLat = document.createElement("td");
-    tdLat.className = "mono";
-    tdLat.textContent = `${item.latencyMs || 0}ms`;
-
-    const tdMsg = document.createElement("td");
-    tdMsg.textContent = item.message || "";
-
-    tr.append(tdTime, tdPortal, tdStatus, tdCode, tdLat, tdMsg);
-    tbody.appendChild(tr);
-  }
-
-  table.appendChild(tbody);
-  logTableWrap.appendChild(table);
-}
-
-async function loadLogsTab() {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: "TAXCAP_GET_LOGS" });
-    if (!res?.ok) return;
-    const st = res.stats || {};
-    logTotal.textContent = String(st.total || 0);
-    logOk.textContent = String(st.successCount || 0);
-    logErr.textContent = String(st.errorCount || 0);
-    logLatency.textContent = `${st.avgLatencyMs || 0} ms`;
-    cachedLogs = Array.isArray(res.logs) ? res.logs : [];
-    renderLogsTable();
-  } catch {
-    // ignore
-  }
-}
-
-logPortalFilter.addEventListener("change", renderLogsTable);
-for (const pill of logStatusPills) {
-  pill.addEventListener("click", () => {
-    logStatusFilter = pill.dataset.status || "all";
-    for (const p of logStatusPills) {
-      p.classList.toggle("active", p === pill);
-    }
-    renderLogsTable();
-  });
-}
-logRefreshBtn.addEventListener("click", loadLogsTab);
-logClearBtn.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "TAXCAP_CLEAR_LOGS" });
-  await loadLogsTab();
 });
 
 activateBtn.addEventListener("click", async () => {
@@ -758,5 +397,13 @@ licDeactivateBtn.addEventListener("click", async () => {
     licDeactivateBtn.disabled = false;
   }
 });
+
+if (typeof chrome !== "undefined" && chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local") return;
+    if (changes[STATS_KEY]) refreshDailyStats();
+    if (changes[LICENSE_KEY]) loadLicenseStatus();
+  });
+}
 
 loadState();

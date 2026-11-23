@@ -18,7 +18,6 @@ import { solveCaptchaInBrowser } from '../utils/localOnnxSolver';
 interface SandboxPanelProps {
   onnxReady?: boolean;
   wasmReady?: boolean;
-  onSolved?: () => void;
 }
 
 const MAIN_PORTAL_TO_CONG: Record<PortalId, string> = {
@@ -31,7 +30,6 @@ const MAIN_PORTAL_TO_CONG: Record<PortalId, string> = {
 export const SandboxPanel: React.FC<SandboxPanelProps> = ({
   onnxReady = true,
   wasmReady = true,
-  onSolved,
 }) => {
   const [portal, setPortal] = useState<PortalId>('hddt');
   const [customCong, setCustomCong] = useState<string>('auto');
@@ -45,7 +43,6 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
   const [autoSolveOnChange, setAutoSolveOnChange] = useState<boolean>(false);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const lastSampleRef = useRef<{ sampleId: string; predicted: string } | null>(null);
   const retryStateRef = useRef<RetryState>(retryState);
   retryStateRef.current = retryState;
 
@@ -101,40 +98,6 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
           setLastLatencyMs(result.latencyMs);
           setLastSourceTag(tag);
           setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_SUCCESS', code: result.captcha }));
-
-          // Ghi nhận kết quả giải cục bộ vào Kho Dữ liệu & Nhật ký Studio (nếu backend đang chạy)
-          const recordPortal = customImageSrc && customCong !== 'auto' ? customCong : portal;
-          try {
-            const recRes = await fetch('/api/dataset/record-local', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-TaxCap-Sandbox': '1',
-              },
-              body: JSON.stringify({
-                portal: recordPortal,
-                captcha: result.captcha,
-                source: result.source,
-                confidence: result.confidence,
-                latencyMs: result.latencyMs,
-                image: result.thumbnail,
-                message: tag,
-              }),
-            });
-            const recData = await recRes.json().catch(() => ({}));
-            if (recRes.ok && recData?.sampleId) {
-              lastSampleRef.current = {
-                sampleId: String(recData.sampleId),
-                predicted: result.captcha,
-              };
-            } else {
-              lastSampleRef.current = null;
-            }
-          } catch {
-            lastSampleRef.current = null;
-          }
-
-          onSolved?.();
         } else {
           setLastLatencyMs(null);
           setLastSourceTag('');
@@ -144,13 +107,12 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
               message: result.message || undefined,
             }),
           );
-          onSolved?.();
         }
       } catch {
         setRetryState((prev) => nextRetryState(prev, { type: 'SOLVE_FAILED' }));
       }
     },
-    [activeImageSrc, customCong, customImageSrc, effectiveCong, imageKey, onSolved, portal],
+    [activeImageSrc, effectiveCong, imageKey],
   );
 
   useEffect(() => {
@@ -213,27 +175,6 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
     e.target.value = '';
   };
 
-  const sendSandboxFeedback = (finalCode: string) => {
-    const sample = lastSampleRef.current;
-    if (!sample) return;
-    lastSampleRef.current = null;
-    const outcome = finalCode === sample.predicted ? 'verified' : 'corrected';
-    fetch('/api/dataset/feedback', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-TaxCap-Sandbox': '1',
-      },
-      body: JSON.stringify({
-        sampleId: sample.sampleId,
-        outcome,
-        finalLabel: finalCode,
-      }),
-    })
-      .then(() => onSolved?.())
-      .catch(() => {});
-  };
-
   const handleVerifyForm = (e: React.FormEvent) => {
     e.preventDefault();
     const cleaned = inputValue.trim();
@@ -242,19 +183,17 @@ export const SandboxPanel: React.FC<SandboxPanelProps> = ({
       return;
     }
     if (customImageSrc) {
-      sendSandboxFeedback(cleaned);
       setSubmitFeedback({
         kind: 'ok',
-        text: `Đã xác nhận & lưu mẫu "${cleaned}" vào Kho Dữ liệu.`,
+        text: `Đã xác nhận mã "${cleaned}" từ ảnh tải lên.`,
       });
       return;
     }
     const matched = cleaned.toUpperCase() === expectedCode.toUpperCase();
     if (matched) {
-      sendSandboxFeedback(cleaned);
       setSubmitFeedback({
         kind: 'ok',
-        text: `Khớp chính xác mã "${expectedCode}" — đã lưu vào Kho Dữ liệu.`,
+        text: `Khớp chính xác mã "${expectedCode}".`,
       });
       setRetryState((prev) => nextRetryState(prev, { type: 'RESET' }));
     } else {
